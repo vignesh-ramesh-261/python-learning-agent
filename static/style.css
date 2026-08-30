@@ -164,6 +164,11 @@ details.construct[open] summary { border-bottom: 1px solid var(--border); }
   display: inline-block; margin-top: 8px; color: var(--accent); cursor: pointer;
   font-size: 13px; background: none; border: none; padding: 0; text-decoration: underline;
 }
+.quiz-actions {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  margin-top: 10px; padding-top: 8px; border-top: 1px dashed #2a3a5a;
+}
+.quiz-actions .lesson-link { margin-top: 0; }
 
 /* ---------- findings ---------- */
 .finding {

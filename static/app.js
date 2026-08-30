@@ -925,6 +925,28 @@ function renderQuiz() {
       el("div", { class: `quiz-feedback ${correct ? "ok" : "no"}` },
         el("strong", { text: correct ? "✓ Correct. " : `✗ Not quite — answer: ${q.options[q.answer]}. ` }),
         el("span", { text: q.explanation }),
+        // Missing a question is exactly when you want the lesson behind it.
+        q.lesson ? el("div", { class: "quiz-actions" },
+          el("button", {
+            class: "lesson-link",
+            text: `→ Review the lesson: ${LESSON_TITLES[q.lesson] || q.lesson}`,
+            onclick: () => openLesson(q.lesson),
+          }),
+          el("button", {
+            class: "chip-btn", type: "button", text: "💬 Ask the tutor why",
+            onclick: () => {
+              openLesson(q.lesson);
+              lessonChat.ask(
+                `Quiz question: ${q.question}\n` +
+                (q.code ? "```python\n" + q.code + "\n```\n" : "") +
+                `I answered "${q.options[idx]}". The correct answer is ` +
+                `"${q.options[q.answer]}".\n\n` +
+                (correct
+                  ? "I got it right — explain why the other options are wrong so I really understand it."
+                  : "Explain why my answer is wrong and how to reason about this next time."));
+            },
+          }),
+        ) : null,
       ),
     );
     card.appendChild(

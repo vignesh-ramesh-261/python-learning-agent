@@ -41,9 +41,15 @@ Each lesson: why-it's-designed-that-way prose, annotated examples (one click sen
 Explainer), key points, and real interview Q&As.
 
 ### 🎯 Practice
-24 interview-style questions built around the classic Python gotchas (mutable defaults, `is` vs
+32 interview-style questions built around the classic Python gotchas (mutable defaults, `is` vs
 `==`, late-binding closures, shallow copy, `try/finally` return override, short-circuit operands,
-dict ordering, generator laziness…) with instant explanations and score tracking.
+dict ordering, generator laziness, shared class attributes, `__repr__` fallback, decorator sugar,
+`functools.wraps`, `sys.modules` caching…) with instant explanations and score tracking.
+
+Every question links back to the lesson that teaches it, so a wrong answer is one click from the
+explanation — plus an **Ask the tutor why** button that opens the lesson chat pre-loaded with the
+question, your answer and the correct one. All 15 lessons have at least one question; a test
+enforces both invariants so the loop can't silently break.
 
 ---
 

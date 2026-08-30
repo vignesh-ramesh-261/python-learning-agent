@@ -215,3 +215,43 @@ def test_lesson_endpoint_ignores_client_supplied_lesson_text(monkeypatch):
     assert r.status_code == 200
     assert "FORGED" not in captured["system"]
     assert lesson["title"] in captured["system"]
+
+
+# ------------------------------------------------------- quiz ↔ lesson links
+def test_every_quiz_question_links_to_a_real_lesson():
+    from content.quiz import QUIZ
+    from content.lessons import LESSONS
+    lesson_ids = {l["id"] for l in LESSONS}
+    for q in QUIZ:
+        assert q.get("lesson"), f"{q['id']} has no lesson link"
+        assert q["lesson"] in lesson_ids, f"{q['id']} -> unknown lesson {q['lesson']!r}"
+
+
+def test_every_lesson_has_at_least_one_quiz_question():
+    """A lesson with no practice question is a hole in the learning loop."""
+    from content.quiz import QUIZ
+    from content.lessons import LESSONS
+    covered = {q["lesson"] for q in QUIZ}
+    missing = sorted({l["id"] for l in LESSONS} - covered)
+    assert not missing, f"lessons with no quiz question: {missing}"
+
+
+def test_quiz_questions_are_structurally_valid():
+    from content.quiz import QUIZ
+    seen = set()
+    for q in QUIZ:
+        assert q["id"] not in seen, f"duplicate quiz id {q['id']}"
+        seen.add(q["id"])
+        for field in ("topic", "difficulty", "question", "explanation"):
+            assert str(q.get(field, "")).strip(), f"{q['id']} missing {field}"
+        assert len(q["options"]) >= 3, f"{q['id']} needs >=3 options"
+        assert len(set(q["options"])) == len(q["options"]), f"{q['id']} has duplicate options"
+        assert isinstance(q["answer"], int)
+        assert 0 <= q["answer"] < len(q["options"]), f"{q['id']} answer out of range"
+        assert q["difficulty"] in {"easy", "medium", "hard"}, q["id"]
+
+
+def test_quiz_endpoint_exposes_the_lesson_field():
+    """The UI's 'Review the lesson' button depends on this reaching the client."""
+    payload = _client().get("/api/quiz").get_json()
+    assert payload and all(q.get("lesson") for q in payload)
