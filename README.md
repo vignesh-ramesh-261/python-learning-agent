@@ -24,6 +24,7 @@ Drop any Python snippet — especially AI-generated code — and get:
 | **Code review** | ~23 static checks: bugs, smells, performance, security — each with *what/why* and a **concrete fixed snippet** |
 | **Run** | Executes in an isolated subprocess (5s timeout, CPU/memory limits) with **friendly, teachable explanations** when it crashes |
 | **AI deep-dive (optional)** | Plug in your own OpenAI/Anthropic-compatible API key for an extra LLM narrative on top of the static analysis |
+| **AI tutor chat (optional)** | Ask follow-up questions in a real conversation — grounded in the code in your editor, with history |
 
 The explainer works **fully offline**: it parses your code with Python's own `ast` module and
 matches it against a knowledge base of ~45 constructs (comprehensions, decorators, `*args/**kwargs`,
@@ -62,10 +63,26 @@ pip install pytest
 pytest tests/ -v
 ```
 
-### Optional: AI deep-dive
+### Optional: AI deep-dive & tutor chat
 Set an env var before starting (`OPENAI_API_KEY` / `ANTHROPIC_API_KEY`), or paste a key in the
 UI. Keys entered in the UI are stored only in your browser's localStorage and forwarded only to
 the provider you choose. No key? Everything else still works.
+
+Two modes share the same key:
+
+- **Deep-dive with AI** — a one-shot structured breakdown of the whole snippet.
+- **Ask a follow-up** — a real back-and-forth chat with the tutor. The conversation is
+  automatically grounded in whatever is in the editor, so you can ask *"why is that a problem
+  here?"*, *"show me the fix"*, or *"what would an interviewer ask about this?"* and it answers
+  in context. Running a deep-dive seeds the chat, so follow-ups can refer back to the breakdown.
+
+The chat lives in the browser: the server is stateless, keeps no transcripts, and caps history
+at the 20 most recent turns so context and cost stay bounded.
+
+**Using the Google Gemini free tier?** Provider `OpenAI-compatible`, Base URL
+`https://generativelanguage.googleapis.com/v1beta/openai`, model `gemini-2.0-flash`.
+Avoid the `2.5` "thinking" models on this endpoint — they can spend the entire token budget on
+reasoning and return an empty message.
 
 ---
 
@@ -97,7 +114,8 @@ python-learning-agent/
 | `/api/run` | POST `{code}` | sandboxed execution + friendly error explanation |
 | `/api/lessons` | GET | the lesson bank |
 | `/api/quiz` | GET | the question bank |
-| `/api/ai/explain` | POST `{code, provider, api_key?, model?}` | optional LLM narrative |
+| `/api/ai/explain` | POST `{code, provider, api_key?, model?, base_url?}` | optional one-shot LLM narrative |
+| `/api/ai/chat` | POST `{messages[], code, provider, api_key?, model?, base_url?}` | multi-turn tutor Q&A grounded in `code` |
 
 ---
 

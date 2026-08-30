@@ -16,6 +16,10 @@ import urllib.request
 
 TIMEOUT = 60
 
+# Guardrails on client-supplied chat history.
+MAX_HISTORY_TURNS = 20
+MAX_MESSAGE_CHARS = 8000
+
 DEFAULT_OPENAI_BASE = "https://api.openai.com/v1"
 DEFAULT_ANTHROPIC_BASE = "https://api.anthropic.com"
 
@@ -139,17 +143,60 @@ def _http_json(url: str, headers: dict, payload: dict) -> dict:
 
 
 def call_llm(provider: str, api_key: str, model: str | None, user_prompt: str,
-             base_url: str | None = None) -> str:
+             base_url: str | None = None, system: str | None = None) -> str:
+    """Single-turn convenience wrapper around call_chat()."""
+    return call_chat(provider, api_key, model,
+                     [{"role": "user", "content": user_prompt}],
+                     base_url, system)
+
+
+def call_chat(provider: str, api_key: str, model: str | None,
+              messages: list[dict], base_url: str | None = None,
+              system: str | None = None) -> str:
+    """Multi-turn chat. `messages` is a list of {role: user|assistant, content}."""
     provider = (provider or "").lower().strip()
+    messages = sanitize_messages(messages)
+    if not messages:
+        raise AIError("No message to send.")
+    system = (system or SYSTEM_PROMPT)
     if provider == "openai":
-        return _call_openai(api_key, model, user_prompt, base_url)
+        return _call_openai(api_key, model, messages, base_url, system)
     if provider == "anthropic":
-        return _call_anthropic(api_key, model, user_prompt, base_url)
+        return _call_anthropic(api_key, model, messages, base_url, system)
     raise AIError("Unknown provider — choose 'openai' or 'anthropic'.")
 
 
-def _call_openai(api_key: str, model: str | None, user_prompt: str,
-                 base_url: str | None = None) -> str:
+def sanitize_messages(messages, max_turns: int = MAX_HISTORY_TURNS) -> list[dict]:
+    """Validate/normalise a client-supplied history.
+
+    Drops anything malformed, forces roles to user/assistant, trims each
+    message and keeps only the most recent `max_turns` so the context (and the
+    bill) cannot grow without bound. The final message must be from the user.
+    """
+    if not isinstance(messages, list):
+        return []
+    clean: list[dict] = []
+    for m in messages:
+        if not isinstance(m, dict):
+            continue
+        role = str(m.get("role") or "").strip().lower()
+        content = m.get("content")
+        if not isinstance(content, str):
+            continue
+        content = content.strip()
+        if role not in ("user", "assistant") or not content:
+            continue
+        clean.append({"role": role, "content": content[:MAX_MESSAGE_CHARS]})
+    if len(clean) > max_turns:
+        clean = clean[-max_turns:]
+    # Never open the history with an assistant turn (Anthropic rejects it).
+    while clean and clean[0]["role"] == "assistant":
+        clean.pop(0)
+    return clean
+
+
+def _call_openai(api_key: str, model: str | None, messages: list[dict],
+                 base_url: str | None = None, system: str | None = None) -> str:
     if not api_key:
         raise AIError("No API key provided.")
     model = (model or "").strip() or _default_model_for(base_url, DEFAULT_OPENAI_MODEL)
@@ -158,10 +205,8 @@ def _call_openai(api_key: str, model: str | None, user_prompt: str,
         {"Authorization": f"Bearer {api_key}"},
         {
             "model": model,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
+            "messages": [{"role": "system", "content": system or SYSTEM_PROMPT},
+                         *messages],
             "max_tokens": 1800,
             "temperature": 0.3,
         },
@@ -206,8 +251,8 @@ def _call_openai(api_key: str, model: str | None, user_prompt: str,
     )
 
 
-def _call_anthropic(api_key: str, model: str | None, user_prompt: str,
-                    base_url: str | None = None) -> str:
+def _call_anthropic(api_key: str, model: str | None, messages: list[dict],
+                    base_url: str | None = None, system: str | None = None) -> str:
     if not api_key:
         raise AIError("No Anthropic API key provided.")
     data = _http_json(
@@ -215,8 +260,8 @@ def _call_anthropic(api_key: str, model: str | None, user_prompt: str,
         {"x-api-key": api_key, "anthropic-version": "2023-06-01"},
         {
             "model": (model or "").strip() or DEFAULT_ANTHROPIC_MODEL,
-            "system": SYSTEM_PROMPT,
-            "messages": [{"role": "user", "content": user_prompt}],
+            "system": system or SYSTEM_PROMPT,
+            "messages": messages,
             "max_tokens": 1800,
         },
     )
@@ -238,6 +283,35 @@ def _call_anthropic(api_key: str, model: str | None, user_prompt: str,
             f"The model returned an empty response{f' (stop_reason={stop})' if stop else ''}."
         )
     return text
+
+
+CHAT_SYSTEM_PROMPT = (
+    "You are a patient senior Python tutor having a back-and-forth conversation with a "
+    "developer who wants to truly UNDERSTAND Python — to review AI-written code and pass "
+    "interviews. The user's current code is given below for context; keep referring to it "
+    "when relevant, and quote specific lines or names from it.\n\n"
+    "Guidelines:\n"
+    "- Answer the question that was actually asked. Do NOT re-explain the whole file "
+    "unless asked, and do not repeat the 5-heading breakdown.\n"
+    "- Be concise and concrete. Short code blocks over long prose.\n"
+    "- If the question is ambiguous, state your assumption in one line and answer anyway.\n"
+    "- If the question is not about this code, still answer it as a Python tutor.\n"
+    "- If the user is wrong about something, correct them directly and explain why.\n"
+    "- Where useful, end with one short follow-up question that deepens their understanding."
+)
+
+
+def build_chat_system_prompt(code: str, static_summary: str = "",
+                             constructs: list[str] | None = None) -> str:
+    """System prompt for the Q&A chat: tutor persona + the user's code as context."""
+    parts = [CHAT_SYSTEM_PROMPT]
+    if code and code.strip():
+        parts += ["", "The user's current code:", "```python", code[:8000], "```"]
+    if static_summary:
+        parts += ["", f"A static analyzer determined: {static_summary}"]
+    if constructs:
+        parts += ["Constructs detected: " + ", ".join(constructs)]
+    return "\n".join(parts)
 
 
 def build_user_prompt(code: str, static_summary: str, constructs: list[str]) -> str:

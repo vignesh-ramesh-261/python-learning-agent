@@ -115,6 +115,21 @@ def process(items):
               <code>gemini-2.0-flash</code>. Avoid <code>2.5</code> “thinking” models here —
               they can spend the whole token budget reasoning and return nothing.</p>
             <div id="ai-output" class="ai-output hidden"></div>
+
+            <div class="ai-chat">
+              <div class="ai-chat-head">
+                <h3>Ask a follow-up <span class="muted">— chat with the tutor about this code</span></h3>
+                <button id="btn-chat-clear" class="btn ghost small-btn" title="Start a new conversation">Clear chat</button>
+              </div>
+              <div id="chat-log" class="chat-log" aria-live="polite"></div>
+              <div id="chat-suggestions" class="chat-suggestions"></div>
+              <form id="chat-form" class="chat-form" autocomplete="off">
+                <textarea id="chat-input" rows="1" spellcheck="true"
+                  placeholder="e.g. Why is a mutable default argument a problem here? (Enter to send, Shift+Enter for newline)"></textarea>
+                <button id="btn-chat-send" class="btn primary" type="submit">Send</button>
+              </form>
+              <div id="chat-status" class="muted small"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -150,7 +165,10 @@ def process(items):
           <li><strong>Explain</strong> — paste any snippet (especially AI-generated code). A real AST
             analyzer detects the constructs used and explains <em>what it is</em>, <em>why the syntax
             looks like that</em>, then walks through the code statement by statement, reviews it for
-            bugs/smells with concrete fixes, and can run it with plain-English error explanations.</li>
+            bugs/smells with concrete fixes, and can run it with plain-English error explanations.
+            With your own API key you can also <em>chat</em> with an AI tutor about the snippet —
+            it keeps the conversation and your code in context, so follow-ups actually build on
+            each other.</li>
           <li><strong>Learn</strong> — 15 fundamentals lessons (mutability, scoping, functions, OOP,
             generators, decorators…) with annotated examples, key points and interview Q&amp;As.</li>
           <li><strong>Practice</strong> — 24 interview-style questions built around the classic Python

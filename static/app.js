@@ -290,6 +290,9 @@ $("#btn-clear").addEventListener("click", () => {
   $("#explain-error").classList.add("hidden");
   $("#run-results").classList.add("hidden");
   $("#ai-output").classList.add("hidden");
+  chatHistory = [];
+  renderChat();
+  chatStatus("");
 });
 
 function renderSyntaxError(err) {
@@ -476,7 +479,13 @@ $("#btn-ai").addEventListener("click", async () => {
     const data = await api("/api/ai/explain", { code, provider, api_key, model, base_url });
     out.replaceChildren(...renderMarkdown(data.text));
     out.classList.remove("hidden");
-    aiStatus("Done.");
+    aiStatus("Done — now ask follow-up questions in the chat below.");
+    // Seed the conversation so follow-ups can refer to "this breakdown".
+    chatHistory = [
+      { role: "user", content: "Give me a full breakdown of the code I'm working on." },
+      { role: "assistant", content: data.text },
+    ];
+    renderChat();
   } catch (e) {
     aiStatus(`⚠️ ${e.message}`);
   } finally {
@@ -486,33 +495,182 @@ $("#btn-ai").addEventListener("click", async () => {
 
 function aiStatus(text) { $("#ai-status").textContent = text; }
 
+/* Inline markdown → DOM nodes. Text-only (textContent), so it is XSS-safe. */
+function renderInline(line) {
+  const out = [];
+  // Split on **bold** and `code`, keeping the delimiters' contents.
+  const parts = line.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+  for (const part of parts) {
+    if (!part) continue;
+    if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
+      out.push(el("strong", { text: part.slice(2, -2) }));
+    } else if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
+      out.push(el("code", { text: part.slice(1, -1) }));
+    } else {
+      out.push(document.createTextNode(part));
+    }
+  }
+  return out;
+}
+
 function renderMarkdown(text) {
   const nodes = [];
   let inCode = false;
   let codeBuf = [];
+  let list = null;
+
+  const closeList = () => { if (list) { nodes.push(list); list = null; } };
+
   for (const line of (text || "").split("\n")) {
     if (line.trim().startsWith("```")) {
       if (inCode) {
         nodes.push(el("pre", { text: codeBuf.join("\n") }));
         codeBuf = [];
+      } else {
+        closeList();
       }
       inCode = !inCode;
       continue;
     }
     if (inCode) { codeBuf.push(line); continue; }
-    const heading = line.match(/^(#{1,4})\s+(.*)/);
-    if (heading) { nodes.push(el("h4", { text: heading[2] })); continue; }
-    if (!line.trim()) { continue; }
-    const p = el("p");
-    // minimal inline bold, safely
-    for (const part of line.split(/\*\*(.+?)\*\*/g)) {
-      p.appendChild(document.createTextNode(part));
+
+    const heading = line.match(/^\s*(#{1,4})\s+(.*)/);
+    if (heading) { closeList(); nodes.push(el("h4", { text: heading[2] })); continue; }
+
+    const bullet = line.match(/^\s*[-*+]\s+(.*)/);
+    const numbered = line.match(/^\s*\d+[.)]\s+(.*)/);
+    if (bullet || numbered) {
+      const wantTag = bullet ? "ul" : "ol";
+      if (!list || list.tagName.toLowerCase() !== wantTag) { closeList(); list = el(wantTag); }
+      list.appendChild(el("li", {}, ...renderInline((bullet || numbered)[1])));
+      continue;
     }
-    nodes.push(p);
+
+    if (!line.trim()) { closeList(); continue; }
+    closeList();
+    nodes.push(el("p", {}, ...renderInline(line)));
   }
+  closeList();
   if (codeBuf.length) nodes.push(el("pre", { text: codeBuf.join("\n") }));
   return nodes.length ? nodes : [el("p", { class: "muted", text: "(empty response)" })];
 }
+
+/* ------------------------------------------------------------- AI chat Q&A */
+const SUGGESTED_QUESTIONS = [
+  "Explain line by line",
+  "What would break in production?",
+  "How would I make this faster?",
+  "What interview questions come from this?",
+  "Rewrite this the idiomatic way",
+];
+
+let chatHistory = [];   // [{role: 'user'|'assistant', content}]
+let chatBusy = false;
+
+const chatLogEl = $("#chat-log");
+const chatInputEl = $("#chat-input");
+const chatStatusEl = $("#chat-status");
+
+function chatStatus(text) { chatStatusEl.textContent = text || ""; }
+
+function aiSettings() {
+  return {
+    provider: $("#ai-provider").value,
+    api_key: $("#ai-key").value.trim(),
+    model: $("#ai-model").value.trim(),
+    base_url: $("#ai-baseurl").value.trim(),
+  };
+}
+
+function autoGrow(el_) {
+  el_.style.height = "auto";
+  el_.style.height = Math.min(el_.scrollHeight, 160) + "px";
+}
+chatInputEl.addEventListener("input", () => autoGrow(chatInputEl));
+
+function renderChat() {
+  chatLogEl.replaceChildren();
+  if (!chatHistory.length) {
+    chatLogEl.appendChild(el("p", { class: "muted small chat-empty", text:
+      "No questions yet. Ask anything about the code above — or run a deep-dive first, then dig into it." }));
+  }
+  for (const msg of chatHistory) {
+    const row = el("div", { class: `chat-msg ${msg.role}` });
+    row.appendChild(el("div", { class: "chat-role", text: msg.role === "user" ? "You" : "Tutor" }));
+    const bubble = el("div", { class: "chat-bubble" });
+    if (msg.role === "user") bubble.appendChild(el("p", { text: msg.content }));
+    else bubble.replaceChildren(...renderMarkdown(msg.content));
+    row.appendChild(bubble);
+    chatLogEl.appendChild(row);
+  }
+  if (chatBusy) {
+    chatLogEl.appendChild(
+      el("div", { class: "chat-msg assistant" },
+        el("div", { class: "chat-role", text: "Tutor" }),
+        el("div", { class: "chat-bubble thinking" }, el("span", { class: "dots", text: "thinking…" })),
+      ),
+    );
+  }
+  chatLogEl.scrollTop = chatLogEl.scrollHeight;
+}
+
+function renderSuggestions() {
+  $("#chat-suggestions").replaceChildren(
+    ...SUGGESTED_QUESTIONS.map((q) =>
+      el("button", {
+        class: "chip-btn", type: "button", text: q,
+        onclick: () => { chatInputEl.value = q; autoGrow(chatInputEl); sendChat(); },
+      })),
+  );
+}
+
+async function sendChat() {
+  if (chatBusy) return;
+  const question = chatInputEl.value.trim();
+  if (!question) return;
+  const { provider, api_key, model, base_url } = aiSettings();
+  if (!api_key) { chatStatus("⚠️ Add your API key in the box above first."); return; }
+
+  chatHistory.push({ role: "user", content: question });
+  chatInputEl.value = "";
+  autoGrow(chatInputEl);
+  chatBusy = true;
+  $("#btn-chat-send").disabled = true;
+  chatStatus("");
+  renderChat();
+
+  try {
+    const data = await api("/api/ai/chat", {
+      messages: chatHistory,
+      code: codeEl.value.trim(),
+      provider, api_key, model, base_url,
+    });
+    chatHistory.push({ role: "assistant", content: data.text });
+  } catch (e) {
+    // Keep the question in the box so it isn't lost on a failed request.
+    chatHistory.pop();
+    chatInputEl.value = question;
+    autoGrow(chatInputEl);
+    chatStatus(`⚠️ ${e.message}`);
+  } finally {
+    chatBusy = false;
+    $("#btn-chat-send").disabled = false;
+    renderChat();
+  }
+}
+
+$("#chat-form").addEventListener("submit", (e) => { e.preventDefault(); sendChat(); });
+chatInputEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); }
+});
+$("#btn-chat-clear").addEventListener("click", () => {
+  chatHistory = [];
+  chatStatus("");
+  renderChat();
+});
+
+renderSuggestions();
+renderChat();
 
 /* ---------------------------------------------------------------- learn */
 const LESSON_TITLES = {};

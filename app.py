@@ -95,6 +95,53 @@ def api_ai_explain():
     return jsonify({"text": text})
 
 
+@app.post("/api/ai/chat")
+def api_ai_chat():
+    """Multi-turn Q&A with the tutor, grounded in the user's current code.
+
+    The browser owns the conversation and posts the full history each time —
+    the server stays stateless and never persists keys or transcripts.
+    """
+    data = request.get_json(silent=True) or {}
+    messages = llm.sanitize_messages(data.get("messages"))
+    if not messages:
+        return _bad_request("No question provided.")
+    if messages[-1]["role"] != "user":
+        return _bad_request("The last message must be from the user.")
+
+    provider = (data.get("provider") or "openai").lower()
+    api_key = (data.get("api_key") or "").strip() or llm.env_key_for(provider)
+    model = (data.get("model") or "").strip() or None
+    base_url = (data.get("base_url") or "").strip() or None
+    if not api_key:
+        return _bad_request(
+            "No API key provided. Paste your key in the AI deep-dive box, or set "
+            f"{provider.upper()}_API_KEY in the server environment."
+        )
+
+    code = (data.get("code") or "").strip()
+    summary, constructs = "", []
+    if code:
+        try:
+            analysis = analyze(code)
+            summary = analysis.get("summary", "")
+            constructs = [c["name"] for c in analysis.get("constructs", [])][:12]
+        except Exception:  # noqa: BLE001 - unparseable code must not block the chat
+            pass
+    system = llm.build_chat_system_prompt(code, summary, constructs)
+
+    try:
+        text = llm.call_chat(provider, api_key, model, messages, base_url, system)
+    except llm.AIError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        app.logger.exception("AI chat failed")
+        return jsonify({"error": f"Unexpected error calling the AI provider: {exc}"}), 500
+    if not (text or "").strip():
+        return jsonify({"error": "The model returned an empty response."}), 400
+    return jsonify({"text": text})
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     # 0.0.0.0 so the app is reachable from the container preview / LAN.
