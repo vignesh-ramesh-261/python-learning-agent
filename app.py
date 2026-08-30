@@ -78,10 +78,20 @@ def api_ai_explain():
     analysis = analyze(code)
     constructs = [c["name"] for c in analysis.get("constructs", [])][:12]
     prompt = llm.build_user_prompt(code, analysis.get("summary", ""), constructs)
+    if not api_key:
+        return _bad_request(
+            "No API key provided. Paste your key in the AI deep-dive box, or set "
+            f"{provider.upper()}_API_KEY in the server environment."
+        )
     try:
         text = llm.call_llm(provider, api_key, model, prompt, base_url)
     except llm.AIError as exc:
         return jsonify({"error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001 - never 500 with an empty body
+        app.logger.exception("AI deep-dive failed")
+        return jsonify({"error": f"Unexpected error calling the AI provider: {exc}"}), 500
+    if not (text or "").strip():
+        return jsonify({"error": "The model returned an empty response."}), 400
     return jsonify({"text": text})
 
 

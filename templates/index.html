@@ -104,10 +104,16 @@ def process(items):
               </select>
               <input id="ai-key" type="password" placeholder="API key (sk-…)" />
               <input id="ai-model" type="text" placeholder="model, e.g. gemini-2.0-flash" />
-              <input id="ai-baseurl" type="text" placeholder="Base URL (optional — for free tiers)" />
+              <input id="ai-baseurl" type="text"
+                placeholder="Base URL (optional) — e.g. https://generativelanguage.googleapis.com/v1beta/openai" />
               <button id="btn-ai" class="btn">Deep-dive with AI</button>
             </div>
             <div id="ai-status" class="muted small"></div>
+            <p class="muted small">Using Google Gemini free tier? Provider
+              <b>OpenAI-compatible</b>, Base URL
+              <code>https://generativelanguage.googleapis.com/v1beta/openai</code>, model
+              <code>gemini-2.0-flash</code>. Avoid <code>2.5</code> “thinking” models here —
+              they can spend the whole token budget reasoning and return nothing.</p>
             <div id="ai-output" class="ai-output hidden"></div>
           </div>
         </div>

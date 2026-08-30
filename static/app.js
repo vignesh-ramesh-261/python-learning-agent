@@ -453,6 +453,7 @@ const AI_KEYS = ["pla_ai_provider", "pla_ai_key", "pla_ai_model", "pla_ai_baseur
 $("#ai-provider").value = localStorage.getItem(AI_KEYS[0]) || "openai";
 $("#ai-key").value = localStorage.getItem(AI_KEYS[1]) || "";
 $("#ai-model").value = localStorage.getItem(AI_KEYS[2]) || "";
+$("#ai-baseurl").value = localStorage.getItem(AI_KEYS[3]) || "";
 
 $("#btn-ai").addEventListener("click", async () => {
   const code = codeEl.value.trim();
