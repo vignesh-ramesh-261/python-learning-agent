@@ -162,3 +162,56 @@ def test_summary_mentions_findings():
     code = "def f(items=[]):\n    return items\n"
     result = analyze(code)
     assert "improvement" in result["summary"] or "flagged" in result["summary"]
+
+
+# ------------------------------------------------- /api/ai/lesson endpoint
+def _client():
+    import app as app_mod
+    app_mod.app.config["TESTING"] = True
+    return app_mod.app.test_client()
+
+
+def test_lesson_endpoint_rejects_unknown_lesson():
+    r = _client().post("/api/ai/lesson", json={
+        "lesson_id": "does-not-exist", "api_key": "k",
+        "messages": [{"role": "user", "content": "hi"}]})
+    assert r.status_code == 400
+    assert "Unknown lesson" in r.get_json()["error"]
+
+
+def test_lesson_endpoint_requires_a_question():
+    from content.lessons import LESSONS
+    r = _client().post("/api/ai/lesson", json={
+        "lesson_id": LESSONS[0]["id"], "api_key": "k", "messages": []})
+    assert r.status_code == 400
+
+
+def test_lesson_endpoint_requires_a_key(monkeypatch):
+    from content.lessons import LESSONS
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    r = _client().post("/api/ai/lesson", json={
+        "lesson_id": LESSONS[0]["id"], "api_key": "",
+        "messages": [{"role": "user", "content": "hi"}]})
+    assert r.status_code == 400
+    assert "No API key" in r.get_json()["error"]
+
+
+def test_lesson_endpoint_ignores_client_supplied_lesson_text(monkeypatch):
+    """Grounding comes from the server's lesson bank, not the request body."""
+    import ai.llm as llm_mod
+    from content.lessons import LESSONS
+    captured = {}
+
+    def fake_call_chat(provider, api_key, model, messages, base_url, system):
+        captured["system"] = system
+        return "ok"
+
+    monkeypatch.setattr(llm_mod, "call_chat", fake_call_chat)
+    lesson = LESSONS[0]
+    r = _client().post("/api/ai/lesson", json={
+        "lesson_id": lesson["id"], "api_key": "k",
+        "lesson": {"title": "FORGED"}, "code": "FORGED",
+        "messages": [{"role": "user", "content": "hi"}]})
+    assert r.status_code == 200
+    assert "FORGED" not in captured["system"]
+    assert lesson["title"] in captured["system"]

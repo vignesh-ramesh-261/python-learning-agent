@@ -264,3 +264,64 @@ def test_per_host_override_does_not_leak_to_other_hosts(monkeypatch):
     seen = _capture(monkeypatch, OK)
     llm.call_llm("openai", "key", None, "p", "https://api.groq.com/openai/v1")
     assert seen["payload"]["model"] == llm.BASE_URL_DEFAULT_MODELS["api.groq.com"]
+
+
+# ---------------------------------------------------------- lesson grounding
+LESSON = {
+    "id": "scoping",
+    "title": "Scoping & Closures",
+    "level": "intermediate",
+    "summary": "How Python resolves names.",
+    "sections": [
+        {"heading": "LEGB", "body": "Local, Enclosing, Global, Builtin.",
+         "code": "x = 1\ndef f():\n    print(x)", "code_note": "x resolves globally."},
+    ],
+    "key_points": ["Assignment makes a name local."],
+    "interview_questions": [{"q": "What is a closure?", "a": "A function plus its environment."}],
+}
+
+
+def test_lesson_context_includes_every_part():
+    ctx = llm.build_lesson_context(LESSON)
+    for expected in ["Scoping & Closures", "intermediate", "How Python resolves names.",
+                     "LEGB", "Local, Enclosing, Global, Builtin.", "print(x)",
+                     "x resolves globally.", "Assignment makes a name local.",
+                     "What is a closure?"]:
+        assert expected in ctx, expected
+    assert "```python" in ctx
+
+
+def test_lesson_context_is_capped():
+    big = {"title": "T", "sections": [{"heading": "H", "body": "x" * 50_000}]}
+    assert len(llm.build_lesson_context(big, max_chars=500)) == 500
+
+
+@pytest.mark.parametrize("junk", [None, "string", 42, []])
+def test_lesson_context_tolerates_junk(junk):
+    assert llm.build_lesson_context(junk) == ""
+
+
+def test_lesson_context_skips_malformed_sections():
+    ctx = llm.build_lesson_context({"title": "T", "sections": ["bad", None, {"heading": "Good"}]})
+    assert "Good" in ctx
+
+
+def test_lesson_system_prompt_is_lesson_flavoured():
+    prompt = llm.build_lesson_system_prompt(LESSON)
+    assert "lesson the user is reading" in prompt
+    assert "Scoping & Closures" in prompt
+    # Must not inherit the code-review persona's rigid breakdown headings.
+    assert "1) What this code does" not in prompt
+
+
+def test_lesson_system_prompt_falls_back_when_empty():
+    assert llm.build_lesson_system_prompt({}) == llm.CHAT_SYSTEM_PROMPT
+
+
+def test_all_shipped_lessons_produce_context():
+    """Guards against a lesson shape change silently emptying the AI context."""
+    from content.lessons import LESSONS
+    for lesson in LESSONS:
+        ctx = llm.build_lesson_context(lesson)
+        assert ctx.strip(), lesson.get("id")
+        assert lesson["title"] in ctx

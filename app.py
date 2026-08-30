@@ -130,6 +130,44 @@ def api_ai_chat():
             pass
     system = llm.build_chat_system_prompt(code, summary, constructs)
 
+    return _chat_reply(provider, api_key, model, messages, base_url, system)
+
+
+@app.post("/api/ai/lesson")
+def api_ai_lesson():
+    """Multi-turn Q&A about a lesson from the Learn tab.
+
+    The client sends only a lesson_id; the lesson text is looked up here so the
+    grounding context cannot be forged from the browser.
+    """
+    data = request.get_json(silent=True) or {}
+    messages = llm.sanitize_messages(data.get("messages"))
+    if not messages:
+        return _bad_request("No question provided.")
+    if messages[-1]["role"] != "user":
+        return _bad_request("The last message must be from the user.")
+
+    lesson_id = (data.get("lesson_id") or "").strip()
+    lesson = next((l for l in lessons_mod.LESSONS if l.get("id") == lesson_id), None)
+    if lesson is None:
+        return _bad_request("Unknown lesson.")
+
+    provider = (data.get("provider") or "openai").lower()
+    api_key = (data.get("api_key") or "").strip() or llm.env_key_for(provider)
+    model = (data.get("model") or "").strip() or None
+    base_url = (data.get("base_url") or "").strip() or None
+    if not api_key:
+        return _bad_request(
+            "No API key provided. Paste your key in the AI deep-dive box on the Explain "
+            f"tab, or set {provider.upper()}_API_KEY in the server environment."
+        )
+
+    system = llm.build_lesson_system_prompt(lesson)
+    return _chat_reply(provider, api_key, model, messages, base_url, system)
+
+
+def _chat_reply(provider, api_key, model, messages, base_url, system):
+    """Shared LLM call + error envelope for the chat endpoints."""
     try:
         text = llm.call_chat(provider, api_key, model, messages, base_url, system)
     except llm.AIError as exc:

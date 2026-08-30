@@ -25,6 +25,7 @@ Drop any Python snippet — especially AI-generated code — and get:
 | **Run** | Executes in an isolated subprocess (5s timeout, CPU/memory limits) with **friendly, teachable explanations** when it crashes |
 | **AI deep-dive (optional)** | Plug in your own OpenAI/Anthropic-compatible API key for an extra LLM narrative on top of the static analysis |
 | **AI tutor chat (optional)** | Ask follow-up questions in a real conversation — grounded in the code in your editor, with history |
+| **AI in lessons (optional)** | Every lesson has its own tutor chat that can see the whole lesson: ask for another example, a simpler explanation, or to be quizzed |
 
 The explainer works **fully offline**: it parses your code with Python's own `ast` module and
 matches it against a knowledge base of ~45 constructs (comprehensions, decorators, `*args/**kwargs`,
@@ -71,10 +72,20 @@ the provider you choose. No key? Everything else still works.
 Two modes share the same key:
 
 - **Deep-dive with AI** — a one-shot structured breakdown of the whole snippet.
-- **Ask a follow-up** — a real back-and-forth chat with the tutor. The conversation is
-  automatically grounded in whatever is in the editor, so you can ask *"why is that a problem
-  here?"*, *"show me the fix"*, or *"what would an interviewer ask about this?"* and it answers
-  in context. Running a deep-dive seeds the chat, so follow-ups can refer back to the breakdown.
+- **Ask a follow-up** (Explain tab) — a real back-and-forth chat with the tutor. The
+  conversation is automatically grounded in whatever is in the editor, so you can ask *"why is
+  that a problem here?"*, *"show me the fix"*, or *"what would an interviewer ask about this?"*
+  and it answers in context. Running a deep-dive seeds the chat, so follow-ups can refer back
+  to the breakdown.
+- **Ask about this lesson** (Learn tab) — the same chat, grounded in the lesson you are
+  reading rather than the editor. The tutor gets the lesson's text, code examples, key points
+  and interview questions, so *"explain this more simply"*, *"show me another example"* or
+  *"quiz me on this"* all work without you re-typing any context. Each code example has an
+  *Ask about this example* button, and each interview question a *Go deeper* button. Switching
+  lessons starts a fresh conversation.
+
+Only the `lesson_id` travels from the browser — the lesson text is looked up server-side, so
+the grounding context cannot be forged from the client.
 
 The chat lives in the browser: the server is stateless, keeps no transcripts, and caps history
 at the 20 most recent turns so context and cost stay bounded.
@@ -132,6 +143,7 @@ python-learning-agent/
 | `/api/quiz` | GET | the question bank |
 | `/api/ai/explain` | POST `{code, provider, api_key?, model?, base_url?}` | optional one-shot LLM narrative |
 | `/api/ai/chat` | POST `{messages[], code, provider, api_key?, model?, base_url?}` | multi-turn tutor Q&A grounded in `code` |
+| `/api/ai/lesson` | POST `{messages[], lesson_id, provider, api_key?, model?, base_url?}` | multi-turn tutor Q&A grounded in a lesson |
 
 ---
 

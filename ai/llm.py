@@ -335,6 +335,82 @@ def build_chat_system_prompt(code: str, static_summary: str = "",
     return "\n".join(parts)
 
 
+LESSON_SYSTEM_PROMPT = (
+    "You are a patient senior Python tutor helping a developer work through a lesson. "
+    "The lesson the user is currently reading is given below for context. They rely on AI to "
+    "write scripts and now want to truly UNDERSTAND Python — to review code and pass "
+    "interviews.\n\n"
+    "Guidelines:\n"
+    "- Answer the question that was actually asked. Do NOT summarise the whole lesson unless "
+    "asked; the user can already read it.\n"
+    "- Stay anchored to the lesson's topic, and build on its examples and vocabulary so the "
+    "answer feels continuous with what they just read.\n"
+    "- Be concise and concrete. Short runnable snippets beat long prose.\n"
+    "- Prefer showing the contrast (what people expect vs what Python does) — that is what "
+    "makes these concepts stick.\n"
+    "- If they ask about something the lesson does not cover, answer anyway, then note how it "
+    "relates back to the topic.\n"
+    "- If the user states something incorrect, correct it directly and explain why."
+)
+
+
+def build_lesson_context(lesson: dict, max_chars: int = 6000) -> str:
+    """Flatten a lesson dict into compact text for the model's context window.
+
+    Sections come first (they carry the code examples); key points and
+    interview questions are appended while there is room.
+    """
+    if not isinstance(lesson, dict):
+        return ""
+    out: list[str] = []
+    title = str(lesson.get("title") or "").strip()
+    if title:
+        level = str(lesson.get("level") or "").strip()
+        out.append(f"# Lesson: {title}" + (f" ({level})" if level else ""))
+    summary = str(lesson.get("summary") or "").strip()
+    if summary:
+        out.append(summary)
+
+    for sec in lesson.get("sections") or []:
+        if not isinstance(sec, dict):
+            continue
+        heading = str(sec.get("heading") or "").strip()
+        body = str(sec.get("body") or "").strip()
+        if heading:
+            out.append(f"\n## {heading}")
+        if body:
+            out.append(body)
+        code = str(sec.get("code") or "").strip()
+        if code:
+            out.append("```python\n" + code + "\n```")
+        note = str(sec.get("code_note") or "").strip()
+        if note:
+            out.append(f"Note: {note}")
+
+    points = [str(k).strip() for k in (lesson.get("key_points") or []) if str(k).strip()]
+    if points:
+        out.append("\n## Key points")
+        out += [f"- {p}" for p in points]
+
+    questions = lesson.get("interview_questions") or []
+    if questions:
+        out.append("\n## Interview questions covered")
+        for iq in questions:
+            if isinstance(iq, dict) and str(iq.get("q") or "").strip():
+                out.append(f"- Q: {iq['q']}")
+
+    text = "\n".join(out)
+    return text[:max_chars]
+
+
+def build_lesson_system_prompt(lesson: dict) -> str:
+    """System prompt for lesson Q&A: tutor persona + the lesson as context."""
+    context = build_lesson_context(lesson)
+    if not context:
+        return CHAT_SYSTEM_PROMPT
+    return LESSON_SYSTEM_PROMPT + "\n\nThe lesson the user is reading:\n\n" + context
+
+
 def build_user_prompt(code: str, static_summary: str, constructs: list[str]) -> str:
     parts = [
         "Explain this Python code to a learner:",

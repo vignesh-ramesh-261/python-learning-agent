@@ -52,6 +52,7 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 18px
 .tab-panel.active { display: block; }
 .explain-grid { display: grid; grid-template-columns: minmax(340px, 46%) 1fr; gap: 18px; align-items: start; }
 .learn-grid { display: grid; grid-template-columns: 280px 1fr; gap: 18px; align-items: start; }
+.lesson-col { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
 .results-col { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
 @media (max-width: 980px) { .explain-grid, .learn-grid { grid-template-columns: 1fr; } }
 
@@ -306,11 +307,14 @@ details.construct[open] summary { border-bottom: 1px solid var(--border); }
 .lesson-content .code-note { font-size: 12.8px; color: var(--muted); margin: 4px 0 8px; }
 .key-points { margin: 10px 0; padding-left: 20px; }
 .key-points li { margin: 4px 0; font-size: 13.8px; }
-.lesson-try { margin: 6px 0 4px; }
+.lesson-try { margin: 6px 0 4px; display: flex; flex-wrap: wrap; gap: 6px; }
 .lesson-try .btn { font-size: 12.5px; padding: 5px 10px; }
 details.iq { border: 1px solid var(--border); border-radius: 8px; margin: 8px 0; background: #101827; }
 details.iq summary { cursor: pointer; padding: 9px 12px; font-size: 13.5px; font-weight: 600; }
 details.iq .a { padding: 0 12px 10px; color: var(--muted); font-size: 13.5px; }
+details.iq .a p { margin: 0 0 8px; }
+#lesson-ai-card { border-color: #2a3f6a; }
+#lesson-chat { margin-top: 0; border-top: 0; padding-top: 0; }
 
 /* ---------- quiz ---------- */
 .quiz-wrap { max-width: 760px; margin: 0 auto; }

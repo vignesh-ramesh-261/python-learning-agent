@@ -290,9 +290,7 @@ $("#btn-clear").addEventListener("click", () => {
   $("#explain-error").classList.add("hidden");
   $("#run-results").classList.add("hidden");
   $("#ai-output").classList.add("hidden");
-  chatHistory = [];
-  renderChat();
-  chatStatus("");
+  codeChat.reset();
 });
 
 function renderSyntaxError(err) {
@@ -483,11 +481,10 @@ async function runDeepDive() {
     out.classList.remove("hidden");
     aiStatus("Done — now ask follow-up questions in the chat below.");
     // Seed the conversation so follow-ups can refer to "this breakdown".
-    chatHistory = [
+    codeChat.seed([
       { role: "user", content: "Give me a full breakdown of the code I'm working on." },
       { role: "assistant", content: data.text },
-    ];
-    renderChat();
+    ]);
   } catch (e) {
     aiErrorStatus(e.message, runDeepDive);
   } finally {
@@ -586,39 +583,6 @@ function renderMarkdown(text) {
 }
 
 /* ------------------------------------------------------------- AI chat Q&A */
-const SUGGESTED_QUESTIONS = [
-  "Explain line by line",
-  "What would break in production?",
-  "How would I make this faster?",
-  "What interview questions come from this?",
-  "Rewrite this the idiomatic way",
-];
-
-let chatHistory = [];   // [{role: 'user'|'assistant', content}]
-let chatBusy = false;
-
-const chatLogEl = $("#chat-log");
-const chatInputEl = $("#chat-input");
-const chatStatusEl = $("#chat-status");
-
-function chatStatus(text) { chatStatusEl.textContent = text || ""; }
-
-function chatErrorStatus(message, retry) {
-  chatStatusEl.replaceChildren(document.createTextNode(`⚠️ ${message}`));
-  const better = suggestedModelFrom(message);
-  if (!better) return;
-  chatStatusEl.appendChild(document.createTextNode(" "));
-  chatStatusEl.appendChild(el("button", {
-    class: "chip-btn", type: "button", text: `Switch to ${better} and retry`,
-    onclick: () => {
-      $("#ai-model").value = better;
-      localStorage.setItem(AI_KEYS[2], better);
-      chatStatus("");
-      if (typeof retry === "function") retry();
-    },
-  }));
-}
-
 function aiSettings() {
   return {
     provider: $("#ai-provider").value,
@@ -632,95 +596,176 @@ function autoGrow(el_) {
   el_.style.height = "auto";
   el_.style.height = Math.min(el_.scrollHeight, 160) + "px";
 }
-chatInputEl.addEventListener("input", () => autoGrow(chatInputEl));
 
-function renderChat() {
-  chatLogEl.replaceChildren();
-  if (!chatHistory.length) {
-    chatLogEl.appendChild(el("p", { class: "muted small chat-empty", text:
-      "No questions yet. Ask anything about the code above — or run a deep-dive first, then dig into it." }));
+/* A self-contained chat widget. Used twice: the Explain tab (grounded in the
+   editor's code) and the Learn tab (grounded in the open lesson). */
+function createChat({ root, endpoint, buildPayload, suggestions, emptyText, missingKeyText }) {
+  const logEl = $(".chat-log", root);
+  const inputEl = $(".chat-input", root);
+  const statusEl = $(".chat-status", root);
+  const sendBtn = $(".chat-send", root);
+  const suggestEl = $(".chat-suggestions", root);
+
+  let history = [];
+  let busy = false;
+
+  const setStatus = (text) => { statusEl.textContent = text || ""; };
+
+  function setError(message) {
+    statusEl.replaceChildren(document.createTextNode(`⚠️ ${message}`));
+    const better = suggestedModelFrom(message);
+    if (!better) return;
+    statusEl.appendChild(document.createTextNode(" "));
+    statusEl.appendChild(el("button", {
+      class: "chip-btn", type: "button", text: `Switch to ${better} and retry`,
+      onclick: () => {
+        $("#ai-model").value = better;
+        localStorage.setItem(AI_KEYS[2], better);
+        setStatus("");
+        send();
+      },
+    }));
   }
-  for (const msg of chatHistory) {
-    const row = el("div", { class: `chat-msg ${msg.role}` });
-    row.appendChild(el("div", { class: "chat-role", text: msg.role === "user" ? "You" : "Tutor" }));
-    const bubble = el("div", { class: "chat-bubble" });
-    if (msg.role === "user") bubble.appendChild(el("p", { text: msg.content }));
-    else bubble.replaceChildren(...renderMarkdown(msg.content));
-    row.appendChild(bubble);
-    chatLogEl.appendChild(row);
+
+  function render() {
+    logEl.replaceChildren();
+    if (!history.length) {
+      logEl.appendChild(el("p", { class: "muted small chat-empty", text: emptyText }));
+    }
+    for (const msg of history) {
+      const bubble = el("div", { class: "chat-bubble" });
+      if (msg.role === "user") bubble.appendChild(el("p", { text: msg.content }));
+      else bubble.replaceChildren(...renderMarkdown(msg.content));
+      logEl.appendChild(
+        el("div", { class: `chat-msg ${msg.role}` },
+          el("div", { class: "chat-role", text: msg.role === "user" ? "You" : "Tutor" }),
+          bubble),
+      );
+    }
+    if (busy) {
+      logEl.appendChild(
+        el("div", { class: "chat-msg assistant" },
+          el("div", { class: "chat-role", text: "Tutor" }),
+          el("div", { class: "chat-bubble thinking" },
+            el("span", { class: "dots", text: "thinking…" })),
+        ),
+      );
+    }
+    logEl.scrollTop = logEl.scrollHeight;
   }
-  if (chatBusy) {
-    chatLogEl.appendChild(
-      el("div", { class: "chat-msg assistant" },
-        el("div", { class: "chat-role", text: "Tutor" }),
-        el("div", { class: "chat-bubble thinking" }, el("span", { class: "dots", text: "thinking…" })),
-      ),
+
+  function renderSuggestions(list) {
+    suggestEl.replaceChildren(
+      ...(list || []).map((q) => el("button", {
+        class: "chip-btn", type: "button", text: q,
+        onclick: () => { inputEl.value = q; autoGrow(inputEl); send(); },
+      })),
     );
   }
-  chatLogEl.scrollTop = chatLogEl.scrollHeight;
-}
 
-function renderSuggestions() {
-  $("#chat-suggestions").replaceChildren(
-    ...SUGGESTED_QUESTIONS.map((q) =>
-      el("button", {
-        class: "chip-btn", type: "button", text: q,
-        onclick: () => { chatInputEl.value = q; autoGrow(chatInputEl); sendChat(); },
-      })),
-  );
-}
+  async function send() {
+    if (busy) return;
+    const question = inputEl.value.trim();
+    if (!question) return;
+    const settings = aiSettings();
+    if (!settings.api_key) { setStatus(missingKeyText); return; }
 
-async function sendChat() {
-  if (chatBusy) return;
-  const question = chatInputEl.value.trim();
-  if (!question) return;
-  const { provider, api_key, model, base_url } = aiSettings();
-  if (!api_key) { chatStatus("⚠️ Add your API key in the box above first."); return; }
+    history.push({ role: "user", content: question });
+    inputEl.value = "";
+    autoGrow(inputEl);
+    busy = true;
+    sendBtn.disabled = true;
+    setStatus("");
+    render();
 
-  chatHistory.push({ role: "user", content: question });
-  chatInputEl.value = "";
-  autoGrow(chatInputEl);
-  chatBusy = true;
-  $("#btn-chat-send").disabled = true;
-  chatStatus("");
-  renderChat();
-
-  try {
-    const data = await api("/api/ai/chat", {
-      messages: chatHistory,
-      code: codeEl.value.trim(),
-      provider, api_key, model, base_url,
-    });
-    chatHistory.push({ role: "assistant", content: data.text });
-  } catch (e) {
-    // Keep the question in the box so it isn't lost on a failed request.
-    chatHistory.pop();
-    chatInputEl.value = question;
-    autoGrow(chatInputEl);
-    chatErrorStatus(e.message, sendChat);
-  } finally {
-    chatBusy = false;
-    $("#btn-chat-send").disabled = false;
-    renderChat();
+    try {
+      const data = await api(endpoint, { ...buildPayload(), ...settings, messages: history });
+      history.push({ role: "assistant", content: data.text });
+    } catch (e) {
+      // Keep the question in the box so it isn't lost on a failed request.
+      history.pop();
+      inputEl.value = question;
+      autoGrow(inputEl);
+      setError(e.message);
+    } finally {
+      busy = false;
+      sendBtn.disabled = false;
+      render();
+    }
   }
+
+  inputEl.addEventListener("input", () => autoGrow(inputEl));
+  inputEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+  $(".chat-form", root).addEventListener("submit", (e) => { e.preventDefault(); send(); });
+  $(".chat-clear", root).addEventListener("click", () => { history = []; setStatus(""); render(); });
+
+  renderSuggestions(suggestions);
+  render();
+
+  return {
+    reset(newSuggestions) {
+      history = [];
+      setStatus("");
+      if (newSuggestions) renderSuggestions(newSuggestions);
+      render();
+    },
+    seed(msgs) { history = msgs.slice(); setStatus(""); render(); },
+    /* Prefill the box and send — used by the per-example buttons. */
+    ask(question) {
+      inputEl.value = question;
+      autoGrow(inputEl);
+      root.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      send();
+    },
+    setSuggestions: renderSuggestions,
+    setStatus,
+  };
 }
 
-$("#chat-form").addEventListener("submit", (e) => { e.preventDefault(); sendChat(); });
-chatInputEl.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); }
-});
-$("#btn-chat-clear").addEventListener("click", () => {
-  chatHistory = [];
-  chatStatus("");
-  renderChat();
+const codeChat = createChat({
+  root: $("#code-chat"),
+  endpoint: "/api/ai/chat",
+  buildPayload: () => ({ code: codeEl.value.trim() }),
+  suggestions: [
+    "Explain line by line",
+    "What would break in production?",
+    "How would I make this faster?",
+    "What interview questions come from this?",
+    "Rewrite this the idiomatic way",
+  ],
+  emptyText: "No questions yet. Ask anything about the code above — or run a deep-dive first, then dig into it.",
+  missingKeyText: "⚠️ Add your API key in the box above first.",
 });
 
-renderSuggestions();
-renderChat();
 
 /* ---------------------------------------------------------------- learn */
 const LESSON_TITLES = {};
 let lessonsCache = null;
+let currentLessonId = null;
+
+/* Suggested questions tailored to the lesson being read. */
+function lessonSuggestions(lesson) {
+  const base = [
+    "Explain this more simply",
+    "Show me another example",
+    "What do people get wrong here?",
+    "Quiz me on this topic",
+  ];
+  const firstQ = (lesson.interview_questions || [])[0];
+  if (firstQ && firstQ.q) base.push(`Interview: ${firstQ.q}`);
+  return base;
+}
+
+const lessonChat = createChat({
+  root: $("#lesson-chat"),
+  endpoint: "/api/ai/lesson",
+  buildPayload: () => ({ lesson_id: currentLessonId }),
+  suggestions: [],
+  emptyText: "Stuck on something in this lesson? Ask here — the tutor can see the whole lesson, its examples and its interview questions.",
+  missingKeyText: "⚠️ Add your API key in the AI deep-dive box on the Explain tab first.",
+});
 
 async function loadLessons() {
   if (lessonsCache) return lessonsCache;
@@ -753,6 +798,11 @@ async function selectLesson(id) {
   const lessons = await loadLessons();
   const lesson = lessons.find((l) => l.id === id);
   if (!lesson) return;
+  // Each lesson gets a fresh conversation with its own suggested questions.
+  if (currentLessonId !== id) {
+    currentLessonId = id;
+    lessonChat.reset(lessonSuggestions(lesson));
+  }
   const content = $("#lesson-content");
   content.replaceChildren(
     el("h2", { text: lesson.title }),
@@ -774,6 +824,12 @@ async function selectLesson(id) {
               explain();
             },
           }),
+          el("button", {
+            class: "btn",
+            text: "💬 Ask about this example",
+            onclick: () => lessonChat.ask(
+              `About the "${sec.heading}" example in this lesson — walk me through what happens and why.`),
+          }),
         ) : null,
       ),
     ),
@@ -786,7 +842,16 @@ async function selectLesson(id) {
       ...lesson.interview_questions.map((iq) =>
         el("details", { class: "iq" },
           el("summary", { text: `Q: ${iq.q}` }),
-          el("div", { class: "a", text: iq.a }),
+          el("div", { class: "a" },
+            el("p", { text: iq.a }),
+            el("button", {
+              class: "chip-btn", type: "button", text: "💬 Go deeper on this",
+              onclick: () => lessonChat.ask(
+                `Interview question from this lesson: "${iq.q}"\n\n` +
+                "Go deeper than the short answer — what follow-ups would an interviewer ask, " +
+                "and what would a strong answer include?"),
+            }),
+          ),
         ),
       ),
     ),
