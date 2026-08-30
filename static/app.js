@@ -73,7 +73,7 @@ def main():
         except ValueError as err:
             print(f"skip: {err}")
         else:
-            print(f"{item:>8}: ${total:.2f}")
+            print(f"{item:>8}: \${total:.2f}")
 
 
 if __name__ == "__main__":
