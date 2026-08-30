@@ -73,12 +73,13 @@ def api_ai_explain():
     provider = (data.get("provider") or "openai").lower()
     api_key = (data.get("api_key") or "").strip() or llm.env_key_for(provider)
     model = (data.get("model") or "").strip() or None
+    base_url = (data.get("base_url") or "").strip() or None
 
     analysis = analyze(code)
     constructs = [c["name"] for c in analysis.get("constructs", [])][:12]
     prompt = llm.build_user_prompt(code, analysis.get("summary", ""), constructs)
     try:
-        text = llm.call_llm(provider, api_key, model, prompt)
+        text = llm.call_llm(provider, api_key, model, prompt, base_url)
     except llm.AIError as exc:
         return jsonify({"error": str(exc)}), 400
     return jsonify({"text": text})

@@ -449,7 +449,7 @@ function renderErrorExplanation(err) {
 }
 
 /* ---------------------------------------------------------------- AI deep-dive */
-const AI_KEYS = ["pla_ai_provider", "pla_ai_key", "pla_ai_model"];
+const AI_KEYS = ["pla_ai_provider", "pla_ai_key", "pla_ai_model", "pla_ai_baseurl"];
 $("#ai-provider").value = localStorage.getItem(AI_KEYS[0]) || "openai";
 $("#ai-key").value = localStorage.getItem(AI_KEYS[1]) || "";
 $("#ai-model").value = localStorage.getItem(AI_KEYS[2]) || "";
@@ -460,9 +460,11 @@ $("#btn-ai").addEventListener("click", async () => {
   const provider = $("#ai-provider").value;
   const api_key = $("#ai-key").value.trim();
   const model = $("#ai-model").value.trim();
+  const base_url = $("#ai-baseurl").value.trim();
   localStorage.setItem(AI_KEYS[0], provider);
   localStorage.setItem(AI_KEYS[1], api_key);
   localStorage.setItem(AI_KEYS[2], model);
+  localStorage.setItem(AI_KEYS[3], base_url);
 
   const out = $("#ai-output");
   out.classList.add("hidden");
@@ -470,7 +472,7 @@ $("#btn-ai").addEventListener("click", async () => {
   const btn = $("#btn-ai");
   btn.disabled = true;
   try {
-    const data = await api("/api/ai/explain", { code, provider, api_key, model });
+    const data = await api("/api/ai/explain", { code, provider, api_key, model, base_url });
     out.replaceChildren(...renderMarkdown(data.text));
     out.classList.remove("hidden");
     aiStatus("Done.");

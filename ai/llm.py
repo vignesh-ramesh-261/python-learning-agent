@@ -14,6 +14,9 @@ import urllib.request
 
 TIMEOUT = 60
 
+DEFAULT_OPENAI_BASE = "https://api.openai.com/v1"
+DEFAULT_ANTHROPIC_BASE = "https://api.anthropic.com"
+
 
 class AIError(Exception):
     pass
@@ -55,20 +58,23 @@ def _http_json(url: str, headers: dict, payload: dict) -> dict:
         raise AIError("The API request timed out.") from e
 
 
-def call_llm(provider: str, api_key: str, model: str | None, user_prompt: str) -> str:
+def call_llm(provider: str, api_key: str, model: str | None, user_prompt: str,
+             base_url: str | None = None) -> str:
     provider = (provider or "").lower().strip()
     if provider == "openai":
-        return _call_openai(api_key, model, user_prompt)
+        return _call_openai(api_key, model, user_prompt, base_url)
     if provider == "anthropic":
-        return _call_anthropic(api_key, model, user_prompt)
+        return _call_anthropic(api_key, model, user_prompt, base_url)
     raise AIError("Unknown provider — choose 'openai' or 'anthropic'.")
 
 
-def _call_openai(api_key: str, model: str | None, user_prompt: str) -> str:
+def _call_openai(api_key: str, model: str | None, user_prompt: str,
+                 base_url: str | None = None) -> str:
     if not api_key:
-        raise AIError("No OpenAI API key provided.")
+        raise AIError("No API key provided.")
+    base = (base_url or "").strip() or DEFAULT_OPENAI_BASE
     data = _http_json(
-        "https://api.openai.com/v1/chat/completions",
+        base.rstrip("/") + "/chat/completions",
         {"Authorization": f"Bearer {api_key}"},
         {
             "model": model or "gpt-4o-mini",
@@ -86,11 +92,13 @@ def _call_openai(api_key: str, model: str | None, user_prompt: str) -> str:
         raise AIError("Unexpected response shape from OpenAI.") from e
 
 
-def _call_anthropic(api_key: str, model: str | None, user_prompt: str) -> str:
+def _call_anthropic(api_key: str, model: str | None, user_prompt: str,
+                    base_url: str | None = None) -> str:
     if not api_key:
         raise AIError("No Anthropic API key provided.")
+    base = (base_url or "").strip() or DEFAULT_ANTHROPIC_BASE
     data = _http_json(
-        "https://api.anthropic.com/v1/messages",
+        base.rstrip("/") + "/v1/messages",
         {"x-api-key": api_key, "anthropic-version": "2023-06-01"},
         {
             "model": model or "claude-3-5-haiku-latest",

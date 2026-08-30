@@ -103,7 +103,8 @@ def process(items):
                 <option value="anthropic">Anthropic</option>
               </select>
               <input id="ai-key" type="password" placeholder="API key (sk-…)" />
-              <input id="ai-model" type="text" placeholder="model (optional)" />
+              <input id="ai-model" type="text" placeholder="model, e.g. gemini-2.0-flash" />
+              <input id="ai-baseurl" type="text" placeholder="Base URL (optional — for free tiers)" />
               <button id="btn-ai" class="btn">Deep-dive with AI</button>
             </div>
             <div id="ai-status" class="muted small"></div>
