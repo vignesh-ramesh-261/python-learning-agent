@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 import urllib.error
 import urllib.parse
@@ -29,8 +30,14 @@ DEFAULT_ANTHROPIC_MODEL = "claude-3-5-haiku-latest"
 # When someone points the OpenAI-compatible provider at a third-party gateway,
 # "gpt-4o-mini" does not exist there. Guess a sane default per known host so the
 # very common "I pasted a base URL but left model blank" case still works.
+#
+# NOTE: providers retire model IDs on a fast cadence (Google shut down
+# gemini-2.0-flash on 2026-06-01), so treat every entry here as a best-effort
+# hint that WILL go stale. Any of these can be overridden without a code change
+# by exporting e.g. PLA_DEFAULT_MODEL_GENERATIVELANGUAGE_GOOGLEAPIS_COM=<model>,
+# or globally with PLA_DEFAULT_MODEL. The model box in the UI always wins.
 BASE_URL_DEFAULT_MODELS = {
-    "generativelanguage.googleapis.com": "gemini-2.0-flash",
+    "generativelanguage.googleapis.com": "gemini-3.6-flash",
     "openrouter.ai": "openai/gpt-4o-mini",
     "api.groq.com": "llama-3.3-70b-versatile",
     "api.mistral.ai": "mistral-small-latest",
@@ -67,12 +74,26 @@ def _endpoint(base_url: str | None, default_base: str, path: str) -> str:
 
 
 def _default_model_for(base_url: str | None, fallback: str) -> str:
+    """Best-effort default model when the user leaves the model box blank.
+
+    Precedence: per-host env var > global env var > built-in table > fallback.
+    The env vars exist so a provider retiring a model ID never requires a code
+    change to stay usable.
+    """
+    override = os.environ.get("PLA_DEFAULT_MODEL", "").strip()
     base = (base_url or "").strip()
     if not base:
-        return fallback
+        return override or fallback
     if "://" not in base:
         base = "https://" + base
     host = (urllib.parse.urlparse(base).hostname or "").lower()
+
+    host_var = "PLA_DEFAULT_MODEL_" + re.sub(r"[^A-Z0-9]", "_", host.upper())
+    per_host = os.environ.get(host_var, "").strip()
+    if per_host:
+        return per_host
+    if override:
+        return override
     for known, model in BASE_URL_DEFAULT_MODELS.items():
         if host == known or host.endswith("." + known):
             return model
@@ -238,8 +259,8 @@ def _call_openai(api_key: str, model: str | None, messages: list[dict],
     if finish == "length":
         raise AIError(
             "The model hit the token limit before writing an answer. This happens with "
-            "Gemini 2.5 'thinking' models — try a non-thinking model such as "
-            "gemini-2.0-flash, or shorten the code."
+            "'thinking' models that spend the whole budget on reasoning — try a model "
+            "with thinking disabled or a lower reasoning effort, or shorten the code."
         )
     if finish in ("content_filter", "safety"):
         raise AIError("The provider's safety filter blocked this response.")

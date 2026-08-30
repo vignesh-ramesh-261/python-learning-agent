@@ -458,7 +458,9 @@ $("#ai-key").value = localStorage.getItem(AI_KEYS[1]) || "";
 $("#ai-model").value = localStorage.getItem(AI_KEYS[2]) || "";
 $("#ai-baseurl").value = localStorage.getItem(AI_KEYS[3]) || "";
 
-$("#btn-ai").addEventListener("click", async () => {
+$("#btn-ai").addEventListener("click", runDeepDive);
+
+async function runDeepDive() {
   const code = codeEl.value.trim();
   if (!code) { aiStatus("Load some code first."); return; }
   const provider = $("#ai-provider").value;
@@ -487,13 +489,41 @@ $("#btn-ai").addEventListener("click", async () => {
     ];
     renderChat();
   } catch (e) {
-    aiStatus(`⚠️ ${e.message}`);
+    aiErrorStatus(e.message, runDeepDive);
   } finally {
     btn.disabled = false;
   }
-});
+}
 
 function aiStatus(text) { $("#ai-status").textContent = text; }
+
+/* Providers retire model IDs regularly. Their 404 usually names the
+   replacement ("use models/gemini-3.6-flash instead") — offer a one-click fix
+   instead of making the user hand-edit the model box. */
+function suggestedModelFrom(message) {
+  const m = /models\/([A-Za-z0-9._-]+)\s+for the latest|use\s+models\/([A-Za-z0-9._-]+)|try\s+models\/([A-Za-z0-9._-]+)/i
+    .exec(message || "");
+  const found = m && (m[1] || m[2] || m[3]);
+  if (!found) return null;
+  return found === $("#ai-model").value.trim() ? null : found;
+}
+
+function aiErrorStatus(message, retry) {
+  const box = $("#ai-status");
+  box.replaceChildren(document.createTextNode(`⚠️ ${message}`));
+  const better = suggestedModelFrom(message);
+  if (!better) return;
+  box.appendChild(document.createTextNode(" "));
+  box.appendChild(el("button", {
+    class: "chip-btn", type: "button", text: `Switch to ${better} and retry`,
+    onclick: () => {
+      $("#ai-model").value = better;
+      localStorage.setItem(AI_KEYS[2], better);
+      aiStatus("");
+      if (typeof retry === "function") retry();
+    },
+  }));
+}
 
 /* Inline markdown → DOM nodes. Text-only (textContent), so it is XSS-safe. */
 function renderInline(line) {
@@ -573,6 +603,22 @@ const chatStatusEl = $("#chat-status");
 
 function chatStatus(text) { chatStatusEl.textContent = text || ""; }
 
+function chatErrorStatus(message, retry) {
+  chatStatusEl.replaceChildren(document.createTextNode(`⚠️ ${message}`));
+  const better = suggestedModelFrom(message);
+  if (!better) return;
+  chatStatusEl.appendChild(document.createTextNode(" "));
+  chatStatusEl.appendChild(el("button", {
+    class: "chip-btn", type: "button", text: `Switch to ${better} and retry`,
+    onclick: () => {
+      $("#ai-model").value = better;
+      localStorage.setItem(AI_KEYS[2], better);
+      chatStatus("");
+      if (typeof retry === "function") retry();
+    },
+  }));
+}
+
 function aiSettings() {
   return {
     provider: $("#ai-provider").value,
@@ -651,7 +697,7 @@ async function sendChat() {
     chatHistory.pop();
     chatInputEl.value = question;
     autoGrow(chatInputEl);
-    chatStatus(`⚠️ ${e.message}`);
+    chatErrorStatus(e.message, sendChat);
   } finally {
     chatBusy = false;
     $("#btn-chat-send").disabled = false;

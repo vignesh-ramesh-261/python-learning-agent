@@ -80,9 +80,25 @@ The chat lives in the browser: the server is stateless, keeps no transcripts, an
 at the 20 most recent turns so context and cost stay bounded.
 
 **Using the Google Gemini free tier?** Provider `OpenAI-compatible`, Base URL
-`https://generativelanguage.googleapis.com/v1beta/openai`, model `gemini-2.0-flash`.
-Avoid the `2.5` "thinking" models on this endpoint — they can spend the entire token budget on
-reasoning and return an empty message.
+`https://generativelanguage.googleapis.com/v1beta/openai`, model `gemini-3.6-flash`.
+
+Two gotchas with this endpoint:
+
+- **Model IDs get retired.** Google shut down `gemini-2.0-flash` on 2026-06-01. If you see
+  `404 … is no longer available`, the error names the replacement and the UI offers a
+  one-click *"Switch to … and retry"* button.
+- **Avoid "thinking" models** unless you raise the token cap — they can spend the entire
+  budget on reasoning and return an empty message.
+
+Leaving the model box blank picks a sensible default per provider. Because those defaults go
+stale as providers retire models, you can override them without touching code:
+
+```bash
+export PLA_DEFAULT_MODEL=gemini-3.6-flash                                  # all providers
+export PLA_DEFAULT_MODEL_GENERATIVELANGUAGE_GOOGLEAPIS_COM=gemini-3.6-flash  # one host
+```
+
+Precedence: model box in the UI → per-host env var → global env var → built-in default.
 
 ---
 

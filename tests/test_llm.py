@@ -65,7 +65,16 @@ def test_blank_model_against_gemini_base_does_not_send_gpt(monkeypatch):
     """The original bug: model defaulted to gpt-4o-mini -> 404 on Gemini."""
     seen = _capture(monkeypatch, OK)
     llm.call_llm("openai", "key", None, "prompt", GEMINI_BASE)
-    assert seen["payload"]["model"] == "gemini-2.0-flash"
+    sent = seen["payload"]["model"]
+    assert not sent.startswith("gpt-")
+    assert sent == llm.BASE_URL_DEFAULT_MODELS["generativelanguage.googleapis.com"]
+
+
+def test_gemini_default_is_not_a_retired_model():
+    """gemini-2.0-flash was shut down 2026-06-01; never ship it as a default."""
+    retired = {"gemini-2.0-flash", "gemini-2.0-flash-001",
+               "gemini-2.0-flash-lite", "gemini-2.0-flash-lite-001"}
+    assert not retired & set(llm.BASE_URL_DEFAULT_MODELS.values())
 
 
 def test_blank_model_against_openai_keeps_default(monkeypatch):
@@ -76,17 +85,17 @@ def test_blank_model_against_openai_keeps_default(monkeypatch):
 
 def test_model_is_stripped(monkeypatch):
     seen = _capture(monkeypatch, OK)
-    llm.call_llm("openai", "key", "  gemini-2.0-flash  ", "prompt", GEMINI_BASE)
-    assert seen["payload"]["model"] == "gemini-2.0-flash"
+    llm.call_llm("openai", "key", "  gemini-3.6-flash  ", "prompt", GEMINI_BASE)
+    assert seen["payload"]["model"] == "gemini-3.6-flash"
 
 
 # --------------------------------------------------------------- responses
 def test_thinking_model_empty_content_raises_actionable_error(monkeypatch):
-    """Gemini 2.5 burns the budget on reasoning and returns content: None."""
+    """Thinking models burn the budget on reasoning and return content: None."""
     _capture(monkeypatch, {"choices": [
         {"finish_reason": "length", "message": {"content": None}}]})
     with pytest.raises(llm.AIError, match="token limit"):
-        llm.call_llm("openai", "key", "gemini-2.5-flash", "prompt", GEMINI_BASE)
+        llm.call_llm("openai", "key", "some-thinking-model", "prompt", GEMINI_BASE)
 
 
 def test_never_returns_none(monkeypatch):
@@ -225,3 +234,33 @@ def test_chat_system_prompt_embeds_code_and_differs_from_deepdive():
 
 def test_chat_system_prompt_without_code():
     assert "```python" not in llm.build_chat_system_prompt("")
+
+
+# ------------------------------------------- model-default env var overrides
+def test_global_env_override(monkeypatch):
+    monkeypatch.setenv("PLA_DEFAULT_MODEL", "my-model")
+    seen = _capture(monkeypatch, OK)
+    llm.call_llm("openai", "key", None, "p", GEMINI_BASE)
+    assert seen["payload"]["model"] == "my-model"
+
+
+def test_per_host_env_override_wins_over_global(monkeypatch):
+    monkeypatch.setenv("PLA_DEFAULT_MODEL", "global-model")
+    monkeypatch.setenv("PLA_DEFAULT_MODEL_GENERATIVELANGUAGE_GOOGLEAPIS_COM", "host-model")
+    seen = _capture(monkeypatch, OK)
+    llm.call_llm("openai", "key", None, "p", GEMINI_BASE)
+    assert seen["payload"]["model"] == "host-model"
+
+
+def test_explicit_model_beats_every_override(monkeypatch):
+    monkeypatch.setenv("PLA_DEFAULT_MODEL", "env-model")
+    seen = _capture(monkeypatch, OK)
+    llm.call_llm("openai", "key", "user-picked", "p", GEMINI_BASE)
+    assert seen["payload"]["model"] == "user-picked"
+
+
+def test_per_host_override_does_not_leak_to_other_hosts(monkeypatch):
+    monkeypatch.setenv("PLA_DEFAULT_MODEL_GENERATIVELANGUAGE_GOOGLEAPIS_COM", "host-model")
+    seen = _capture(monkeypatch, OK)
+    llm.call_llm("openai", "key", None, "p", "https://api.groq.com/openai/v1")
+    assert seen["payload"]["model"] == llm.BASE_URL_DEFAULT_MODELS["api.groq.com"]

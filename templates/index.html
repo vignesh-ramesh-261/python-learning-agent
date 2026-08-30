@@ -103,7 +103,7 @@ def process(items):
                 <option value="anthropic">Anthropic</option>
               </select>
               <input id="ai-key" type="password" placeholder="API key (sk-…)" />
-              <input id="ai-model" type="text" placeholder="model, e.g. gemini-2.0-flash" />
+              <input id="ai-model" type="text" placeholder="model, e.g. gemini-3.6-flash" />
               <input id="ai-baseurl" type="text"
                 placeholder="Base URL (optional) — e.g. https://generativelanguage.googleapis.com/v1beta/openai" />
               <button id="btn-ai" class="btn">Deep-dive with AI</button>
@@ -112,8 +112,9 @@ def process(items):
             <p class="muted small">Using Google Gemini free tier? Provider
               <b>OpenAI-compatible</b>, Base URL
               <code>https://generativelanguage.googleapis.com/v1beta/openai</code>, model
-              <code>gemini-2.0-flash</code>. Avoid <code>2.5</code> “thinking” models here —
-              they can spend the whole token budget reasoning and return nothing.</p>
+              <code>gemini-3.6-flash</code>. Google retires model IDs often — if you get a
+              <code>404 … no longer available</code>, the error message names the current
+              replacement; paste that into the model box.</p>
             <div id="ai-output" class="ai-output hidden"></div>
 
             <div class="ai-chat">
