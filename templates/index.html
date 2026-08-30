@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Python Learning Agent</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐍</text></svg>" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon">🐍</span>
+      <div>
+        <h1>Python Learning Agent</h1>
+        <p>Paste code → understand it → get better. Built for interview prep &amp; reviewing AI-written scripts.</p>
+      </div>
+    </div>
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-tab="explain">🔍 Explain</button>
+      <button class="tab" data-tab="learn">📚 Learn</button>
+      <button class="tab" data-tab="practice">🎯 Practice</button>
+      <button class="tab" data-tab="about">ℹ️ About</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- ============ EXPLAIN ============ -->
+    <section id="tab-explain" class="tab-panel active">
+      <div class="explain-grid">
+        <div class="editor-card card">
+          <div class="card-head">
+            <h2>Your code</h2>
+            <div class="editor-actions">
+              <select id="samples" title="Load a sample">
+                <option value="">Load a sample…</option>
+                <option value="basics">Everyday script (functions, f-strings)</option>
+                <option value="comprehensions">Comprehensions &amp; generators</option>
+                <option value="classes">Classes, dataclass &amp; decorators</option>
+                <option value="files">Files &amp; error handling</option>
+                <option value="ai_script">“Typical AI script” (with bugs to find)</option>
+              </select>
+              <button id="btn-explain" class="btn primary">Explain code</button>
+              <button id="btn-run" class="btn">▶ Run</button>
+              <button id="btn-clear" class="btn ghost">Clear</button>
+            </div>
+          </div>
+          <div class="editor-wrap">
+            <pre class="gutter" id="gutter" aria-hidden="true">1</pre>
+            <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off"
+              placeholder="# Paste Python code here — e.g. something an LLM wrote that you want to actually understand…
+# Then hit “Explain code”.
+
+def process(items):
+    totals = {}
+    for i in range(len(items)):
+        name, price = items[i]
+        totals[name] = totals.get(name, 0) + price
+    return totals"></textarea>
+          </div>
+          <p class="editor-hint">Runs locally in your browser → analyzed on this server. Nothing is stored.</p>
+        </div>
+
+        <div class="results-col">
+          <div id="explain-error" class="card error-card hidden"></div>
+
+          <div id="results" class="hidden">
+            <div class="card" id="summary-card">
+              <h2>What this code is</h2>
+              <p id="summary-text" class="summary"></p>
+              <div id="stats-row" class="stats-row"></div>
+            </div>
+
+            <div class="card">
+              <h2>Step-by-step walkthrough</h2>
+              <ol class="walkthrough" id="walkthrough"></ol>
+            </div>
+
+            <div class="card">
+              <h2>Syntax &amp; concepts used <span class="muted">— why it's written this way</span></h2>
+              <div id="constructs"></div>
+            </div>
+
+            <div class="card">
+              <h2>Code review <span class="muted">— what could be done better</span></h2>
+              <div id="findings"></div>
+            </div>
+          </div>
+
+          <div id="run-results" class="card hidden">
+            <h2>Run output</h2>
+            <div id="run-body"></div>
+          </div>
+
+          <div class="card ai-card">
+            <h2>AI deep-dive <span class="muted">(optional — your own API key)</span></h2>
+            <p class="muted">The static analysis above works fully offline. For an extra LLM-written narrative,
+               plug in your own OpenAI- or Anthropic-compatible key. It stays in your browser (localStorage)
+               and is only sent to the provider you choose.</p>
+            <div class="ai-settings">
+              <select id="ai-provider">
+                <option value="openai">OpenAI-compatible</option>
+                <option value="anthropic">Anthropic</option>
+              </select>
+              <input id="ai-key" type="password" placeholder="API key (sk-…)" />
+              <input id="ai-model" type="text" placeholder="model (optional)" />
+              <button id="btn-ai" class="btn">Deep-dive with AI</button>
+            </div>
+            <div id="ai-status" class="muted small"></div>
+            <div id="ai-output" class="ai-output hidden"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ LEARN ============ -->
+    <section id="tab-learn" class="tab-panel">
+      <div class="learn-grid">
+        <aside class="lesson-nav card" id="lesson-nav"></aside>
+        <article class="lesson-content card" id="lesson-content">
+          <p class="muted">Pick a topic on the left. Each lesson: what it is, why it's designed
+          that way, annotated examples you can send to the Explainer, key points, and the
+          interview questions people actually ask.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- ============ PRACTICE ============ -->
+    <section id="tab-practice" class="tab-panel">
+      <div class="quiz-wrap">
+        <div class="card quiz-card" id="quiz-card"></div>
+      </div>
+    </section>
+
+    <!-- ============ ABOUT ============ -->
+    <section id="tab-about" class="tab-panel">
+      <div class="about-wrap card">
+        <h2>Why this tool exists</h2>
+        <p>AI can write the code — but <em>you</em> still get asked the fundamentals in
+        interviews, and you still need to review what the AI wrote. This prototype attacks
+        both problems:</p>
+        <ul>
+          <li><strong>Explain</strong> — paste any snippet (especially AI-generated code). A real AST
+            analyzer detects the constructs used and explains <em>what it is</em>, <em>why the syntax
+            looks like that</em>, then walks through the code statement by statement, reviews it for
+            bugs/smells with concrete fixes, and can run it with plain-English error explanations.</li>
+          <li><strong>Learn</strong> — 15 fundamentals lessons (mutability, scoping, functions, OOP,
+            generators, decorators…) with annotated examples, key points and interview Q&amp;As.</li>
+          <li><strong>Practice</strong> — 24 interview-style questions built around the classic Python
+            gotchas, with instant explanations.</li>
+        </ul>
+        <h2>How the analysis works</h2>
+        <p>The explainer parses your code with Python's own <code>ast</code> module — no internet
+        needed. A knowledge base maps each syntax construct to “what / why / example / interview
+        question”. A review pass runs ~23 static checks (mutable default arguments, bare
+        <code>except</code>, <code>range(len(...))</code>, late-binding closures, shared mutable class
+        attributes, unsafe <code>eval</code>…). “Run” executes your code in an isolated subprocess
+        with CPU/memory limits and a 5-second timeout.</p>
+        <h2>Roadmap</h2>
+        <ul>
+          <li>Spaced-repetition deck generated from <em>your own</em> explained snippets</li>
+          <li>“Refactor challenge” mode: it gives you bad code, you fix it, it diffs + grades</li>
+          <li>Concept tags over time → a personal weakness dashboard</li>
+          <li>Local LLM support (Ollama) for offline AI deep-dives</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer>Python Learning Agent — prototype · analyze · understand · retain</footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
