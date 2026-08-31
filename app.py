@@ -14,6 +14,7 @@ from content import lessons as lessons_mod
 from content import quiz as quiz_mod
 from engine import analyze, explain_runtime_error
 from engine.runner import run_code
+from engine.tracer import trace_code
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024  # 1 MB request cap
@@ -52,6 +53,16 @@ def api_run():
     error = explain_runtime_error(result.get("stderr", ""))
     result["error_explanation"] = error
     return jsonify(result)
+
+
+@app.post("/api/trace")
+def api_trace():
+    """Step-by-step execution recording for the visualizer."""
+    data = request.get_json(silent=True) or {}
+    code = (data.get("code") or "").strip()
+    if not code:
+        return _bad_request("No code provided.")
+    return jsonify(trace_code(code))
 
 
 @app.get("/api/lessons")

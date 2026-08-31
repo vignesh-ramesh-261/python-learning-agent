@@ -23,6 +23,7 @@ Drop any Python snippet — especially AI-generated code — and get:
 | **Step-by-step walkthrough** | Every statement described in one sentence, indented by block depth (collapsed on large files) |
 | **Syntax & concepts used** | Each detected construct with **what** it is, **why the syntax is written that way**, a minimal example, the **interview angle**, and a link to the matching lesson |
 | **Code review** | ~23 static checks: bugs, smells, performance, security — each with *what/why* and a **concrete fixed snippet** |
+| **Execution visualizer** | Step through the code line by line: call stack, live variables, and heap objects — aliased names visibly share one object, so `b = a` looks different from `b = a[:]` |
 | **Run** | Executes in an isolated subprocess (5s timeout, CPU/memory limits) with **friendly, teachable explanations** when it crashes |
 | **AI deep-dive (optional)** | Plug in your own OpenAI/Anthropic-compatible API key for an extra LLM narrative on top of the static analysis |
 | **AI tutor chat (optional)** | Ask follow-up questions in a real conversation — grounded in the code in your editor, with history |
@@ -128,6 +129,7 @@ python-learning-agent/
 ├── engine/                 # the offline brain (pure stdlib: ast + subprocess)
 │   ├── constructs.py       #   construct detector + knowledge base (what/why/example/interview)
 │   ├── explain.py          #   walkthrough, architecture map, finding grouping, summary/stats
+│   ├── tracer.py           #   sandboxed sys.settrace recorder (visualizer)
 │   ├── review.py           #   23 static review checks with concrete fixes
 │   ├── errors.py           #   traceback → friendly explanation (cause + fixes)
 │   └── runner.py           #   isolated subprocess execution (timeout, rlimits, -I mode)
@@ -145,6 +147,7 @@ python-learning-agent/
 | Endpoint | Method | Purpose |
 |---|---|---|
 | `/api/explain` | POST `{code}` | full static analysis (architecture, constructs, walkthrough, grouped findings, stats) |
+| `/api/trace` | POST `{code}` | step-by-step execution recording for the visualizer |
 | `/api/run` | POST `{code}` | sandboxed execution + friendly error explanation |
 | `/api/lessons` | GET | the lesson bank |
 | `/api/quiz` | GET | the question bank |

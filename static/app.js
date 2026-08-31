@@ -951,6 +951,16 @@ async function selectLesson(id) {
           }),
           el("button", {
             class: "btn",
+            text: "👁 Visualize",
+            onclick: () => {
+              codeEl.value = sec.code;
+              updateGutter();
+              showTab("explain");
+              viz.open(sec.code);
+            },
+          }),
+          el("button", {
+            class: "btn",
             text: "💬 Ask about this example",
             onclick: () => lessonChat.ask(
               `About the "${sec.heading}" example in this lesson — walk me through what happens and why.`),
@@ -1057,6 +1067,16 @@ function renderQuiz() {
             text: `→ Review the lesson: ${LESSON_TITLES[q.lesson] || q.lesson}`,
             onclick: () => openLesson(q.lesson),
           }),
+          // "What does this print?" is best answered by watching it print.
+          q.code ? el("button", {
+            class: "chip-btn", type: "button", text: "👁 Watch it run",
+            onclick: () => {
+              codeEl.value = q.code;
+              updateGutter();
+              showTab("explain");
+              viz.open(q.code);
+            },
+          }) : null,
           el("button", {
             class: "chip-btn", type: "button", text: "💬 Ask the tutor why",
             onclick: () => {
@@ -1091,3 +1111,249 @@ function renderQuiz() {
   if (lessons.length) await selectLesson(lessons[0].id);
   await startQuiz(true);
 })();
+
+/* ---------------------------------------------------------- visualizer */
+/* Renders the /api/trace recording: a step slider driving a highlighted
+   source line, the call stack, and the heap. Aliasing is the money shot —
+   two names holding the same {t:"ref", id} get the same colour and the same
+   object box, so "b = a" visibly shares instead of copying. */
+const viz = (() => {
+  const card = $("#viz-card");
+  if (!card) return { open: () => {} };
+
+  const statusEl = $("#viz-status");
+  const noteEl = $("#viz-note");
+  const bodyEl = $("#viz-body");
+  const sourceEl = $("#viz-source");
+  const framesEl = $("#viz-frames");
+  const heapEl = $("#viz-heap");
+  const stdoutEl = $("#viz-stdout");
+  const sliderEl = $("#viz-slider");
+  const counterEl = $("#viz-counter");
+  const playBtn = $("#viz-play");
+
+  let steps = [];
+  let lines = [];
+  let index = 0;
+  let timer = null;
+  let colours = new Map();
+
+  /* Stable colour per heap id, so the same object keeps its colour as you step. */
+  const PALETTE = ["#7aa2f7", "#9ece6a", "#e0af68", "#bb9af7", "#7dcfff", "#f7768e", "#73daca"];
+  function colourFor(id) {
+    if (!colours.has(id)) colours.set(id, PALETTE[colours.size % PALETTE.length]);
+    return colours.get(id);
+  }
+
+  function stop() {
+    if (timer) clearInterval(timer);
+    timer = null;
+    playBtn.textContent = "▶ Play";
+  }
+
+  function renderValue(v) {
+    if (!v) return el("span", { class: "viz-val", text: "—" });
+    if (v.t === "prim") return el("span", { class: "viz-prim", text: v.v });
+    const colour = colourFor(v.id);
+    const chip = el("span", { class: "viz-ref", text: "→" });
+    chip.style.background = colour;
+    chip.title = `object #${v.id}`;
+    return chip;
+  }
+
+  function renderObject(id, entry) {
+    const colour = colourFor(id);
+    const box = el("div", { class: "viz-obj" });
+    box.style.borderLeftColor = colour;
+    const head = el("div", { class: "viz-obj-head" });
+    const dot = el("span", { class: "viz-dot" });
+    dot.style.background = colour;
+    head.appendChild(dot);
+    head.appendChild(el("span", { class: "viz-obj-type", text: entry.t }));
+    box.appendChild(head);
+
+    const items = el("div", { class: "viz-obj-body" });
+    if (entry.kind === "seq" && Array.isArray(entry.v)) {
+      entry.v.forEach((item, i) => {
+        const cell = el("div", { class: "viz-cell" },
+          el("span", { class: "viz-idx", text: String(i) }));
+        cell.appendChild(renderValue(item));
+        items.appendChild(cell);
+      });
+      if (entry.more) items.appendChild(el("div", { class: "viz-more", text: `+${entry.more} more` }));
+    } else if (entry.kind === "map" && Array.isArray(entry.v)) {
+      entry.v.forEach(([k, item]) => {
+        const cell = el("div", { class: "viz-cell" },
+          el("span", { class: "viz-idx", text: k }));
+        cell.appendChild(renderValue(item));
+        items.appendChild(cell);
+      });
+      if (entry.more) items.appendChild(el("div", { class: "viz-more", text: `+${entry.more} more` }));
+    } else {
+      items.appendChild(el("span", { class: "viz-prim", text: String(entry.v) }));
+    }
+    box.appendChild(items);
+    return box;
+  }
+
+  function show(i) {
+    if (!steps.length) return;
+    index = Math.max(0, Math.min(i, steps.length - 1));
+    const step = steps[index];
+    sliderEl.value = String(index);
+    counterEl.textContent = `Step ${index + 1} / ${steps.length}`;
+
+    /* source with the current line highlighted */
+    sourceEl.textContent = "";
+    lines.forEach((text, n) => {
+      const lineNo = n + 1;
+      const row = el("div", { class: "viz-line" + (lineNo === step.line ? " active" : "") });
+      row.appendChild(el("span", { class: "viz-lineno", text: String(lineNo) }));
+      row.appendChild(el("span", { class: "viz-linetext", text: text || " " }));
+      sourceEl.appendChild(row);
+    });
+    const active = sourceEl.querySelector(".viz-line.active");
+    if (active) active.scrollIntoView({ block: "nearest" });
+
+    /* event badge */
+    let badge = "";
+    if (step.event === "return") badge = "returned " + (step.returned ? step.returned.v || "→" : "");
+    if (step.event === "exception") badge = "💥 " + (step.raised || "exception");
+    statusEl.textContent = badge ? `Line ${step.line} — ${badge}` : `Line ${step.line}`;
+    statusEl.className = "muted small" + (step.event === "exception" ? " viz-err" : "");
+
+    /* frames: innermost last, matching how a traceback reads */
+    framesEl.textContent = "";
+    step.stack.forEach((frame, depth) => {
+      const isTop = depth === step.stack.length - 1;
+      const box = el("div", { class: "viz-frame" + (isTop ? " current" : "") });
+      box.appendChild(el("div", { class: "viz-frame-name", text: frame.func }));
+      if (!frame.locals.length) {
+        box.appendChild(el("div", { class: "viz-empty", text: "no variables yet" }));
+      }
+      frame.locals.forEach(([name, value]) => {
+        const row = el("div", { class: "viz-var" },
+          el("span", { class: "viz-varname", text: name }));
+        row.appendChild(renderValue(value));
+        if (value && value.t === "ref") {
+          const entry = step.heap[value.id];
+          if (entry) row.appendChild(el("span", { class: "viz-hint", text: entry.t }));
+        }
+        box.appendChild(row);
+      });
+      framesEl.appendChild(box);
+    });
+
+    /* heap, plus an explicit note when two names share one object */
+    heapEl.textContent = "";
+    const ids = Object.keys(step.heap);
+    if (!ids.length) heapEl.appendChild(el("div", { class: "viz-empty", text: "no objects yet" }));
+    ids.forEach((id) => heapEl.appendChild(renderObject(id, step.heap[id])));
+
+    const names = {};
+    step.stack.forEach((f) => f.locals.forEach(([n, v]) => {
+      if (v && v.t === "ref") (names[v.id] = names[v.id] || []).push(n);
+    }));
+    const shared = Object.entries(names).filter(([, ns]) => ns.length > 1);
+    if (shared.length) {
+      const msg = shared.map(([, ns]) => ns.join(" and ")).join("; ");
+      heapEl.appendChild(el("div", { class: "viz-alias", text:
+        `${msg} point at the same object — changing one changes the other.` }));
+    }
+
+    stdoutEl.textContent = step.stdoutSoFar || "";
+  }
+
+  function bind() {
+    $("#viz-first").onclick = () => { stop(); show(0); };
+    $("#viz-prev").onclick = () => { stop(); show(index - 1); };
+    $("#viz-next").onclick = () => { stop(); show(index + 1); };
+    $("#viz-last").onclick = () => { stop(); show(steps.length - 1); };
+    sliderEl.oninput = () => { stop(); show(Number(sliderEl.value)); };
+    playBtn.onclick = () => {
+      if (timer) return stop();
+      if (index >= steps.length - 1) show(0);
+      playBtn.textContent = "⏸ Pause";
+      timer = setInterval(() => {
+        if (index >= steps.length - 1) return stop();
+        show(index + 1);
+      }, 600);
+    };
+    $("#viz-close").onclick = () => { stop(); card.classList.add("hidden"); };
+    $("#viz-ask").onclick = () => {
+      const step = steps[index];
+      if (!step) return;
+      const frame = step.stack[step.stack.length - 1];
+      const vars = frame.locals.map(([n, v]) =>
+        `${n} = ${v.t === "prim" ? v.v : "object #" + v.id}`).join(", ");
+      showTab("explain");
+      codeChat.ask(
+        `While stepping through this code, at step ${index + 1} we are on line ${step.line} ` +
+        `inside ${frame.func}, where ${vars || "no variables are set yet"}. ` +
+        `Explain what this line does and why the variables look like this.`);
+    };
+    /* arrow keys, but only when the visualizer is actually on screen */
+    document.addEventListener("keydown", (e) => {
+      if (card.classList.contains("hidden") || !steps.length) return;
+      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+      if (typing) return;
+      if (e.key === "ArrowRight") { stop(); show(index + 1); e.preventDefault(); }
+      if (e.key === "ArrowLeft") { stop(); show(index - 1); e.preventDefault(); }
+    });
+  }
+
+  async function open(code) {
+    card.classList.remove("hidden");
+    card.scrollIntoView({ behavior: "smooth", block: "start" });
+    bodyEl.classList.add("hidden");
+    noteEl.classList.add("hidden");
+    statusEl.textContent = "Tracing…";
+    stop();
+    colours = new Map();
+
+    let data;
+    try {
+      data = await api("/api/trace", { code });
+    } catch (err) {
+      statusEl.textContent = `⚠️ ${err.message}`;
+      return;
+    }
+
+    steps = data.steps || [];
+    lines = code.split("\n");
+
+    /* stdout is captured for the whole run; approximate "output so far" by
+       revealing it proportionally as you step, so Play feels alive. */
+    const outLines = (data.stdout || "").split("\n").filter((l) => l !== "");
+    steps.forEach((s, i) => {
+      const shown = Math.ceil(((i + 1) / steps.length) * outLines.length);
+      s.stdoutSoFar = outLines.slice(0, shown).join("\n");
+    });
+
+    const bits = [];
+    if (data.error) bits.push(`💥 ${data.error}`);
+    if (data.note) bits.push(data.note);
+    if (bits.length) {
+      noteEl.textContent = bits.join("  •  ");
+      noteEl.classList.remove("hidden");
+    }
+
+    if (!steps.length) {
+      statusEl.textContent = data.error ? "" : "Nothing to step through.";
+      return;
+    }
+
+    sliderEl.max = String(steps.length - 1);
+    bodyEl.classList.remove("hidden");
+    show(0);
+  }
+
+  bind();
+  return { open };
+})();
+
+$("#btn-visualize").addEventListener("click", () => {
+  const code = codeEl.value.trim();
+  if (!code) return;
+  viz.open(code);
+});
