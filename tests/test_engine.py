@@ -255,3 +255,109 @@ def test_quiz_endpoint_exposes_the_lesson_field():
     """The UI's 'Review the lesson' button depends on this reaching the client."""
     payload = _client().get("/api/quiz").get_json()
     assert payload and all(q.get("lesson") for q in payload)
+
+
+# ------------------------------------------------- architecture & large files
+BIG_SAMPLE = '''
+"""Order service."""
+import json
+from dataclasses import dataclass
+
+
+@dataclass
+class Order:
+    """A customer order."""
+    total: float
+
+
+class OrderError(Exception):
+    pass
+
+
+def load(path):
+    """Read orders."""
+    return json.load(open(path))
+
+
+def summarise(orders):
+    return sum(o.total for o in orders)
+
+
+def stream(orders):
+    for o in orders:
+        yield o.total
+
+
+def unused_helper():
+    return 1
+
+
+def main():
+    data = load("x.json")
+    return summarise(data)
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
+def test_architecture_finds_components_and_roles():
+    from engine import analyze
+    arch = analyze(BIG_SAMPLE)["architecture"]
+    names = {c["name"] for c in arch["components"]}
+    assert {"Order", "OrderError"} <= names
+    order = next(c for c in arch["components"] if c["name"] == "Order")
+    assert "dataclass" in order["why"]
+    err = next(c for c in arch["components"] if c["name"] == "OrderError")
+    assert "exception" in err["why"].lower()
+
+
+def test_architecture_detects_entry_point_and_callers():
+    from engine import analyze
+    arch = analyze(BIG_SAMPLE)["architecture"]
+    assert "main" in arch["entry_points"]
+    fns = {f["name"]: f for f in arch["functions"]}
+    assert fns["main"]["entry"] is True
+    # main() calls load() and summarise(), so they must list main as a caller.
+    assert "main" in fns["load"]["callers"]
+    assert "main" in fns["summarise"]["callers"]
+
+
+def test_architecture_flags_generators_and_dead_code():
+    from engine import analyze
+    arch = analyze(BIG_SAMPLE)["architecture"]
+    fns = {f["name"]: f for f in arch["functions"]}
+    assert "generator" in fns["stream"]["role"]
+    assert "unused_helper" in arch["orphans"]
+    assert "main" not in arch["orphans"]        # entry points are not orphans
+    assert arch["dependencies"] == ["dataclasses", "json"]
+
+
+def test_findings_are_grouped_by_rule():
+    from engine import analyze
+    code = "\n".join(f"def f{i}(a=[]):\n    return a\n" for i in range(12))
+    a = analyze(code)
+    assert len(a["findings"]) >= 12
+    groups = a["finding_groups"]
+    mutable = [g for g in groups if g["id"] == "mutable_default"]
+    assert len(mutable) == 1, "the same rule must collapse into one group"
+    assert mutable[0]["count"] >= 12
+    assert len(mutable[0]["lines"]) == mutable[0]["count"]
+    assert mutable[0]["lines"] == sorted(mutable[0]["lines"])
+
+
+def test_large_file_is_flagged():
+    from engine import analyze, LARGE_FILE_STEPS
+    small = analyze("x = 1\n")
+    assert small["large"] is False
+    big = analyze("\n".join(f"x{i} = {i}" for i in range(LARGE_FILE_STEPS + 20)))
+    assert big["large"] is True
+
+
+def test_summary_reports_distinct_issues_not_raw_hits():
+    from engine import analyze
+    code = "\n".join(f"def f{i}(a=[]):\n    return a\n" for i in range(10))
+    summary = analyze(code)["summary"]
+    assert "distinct issue" in summary
+    assert "location" in summary

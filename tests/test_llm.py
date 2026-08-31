@@ -325,3 +325,80 @@ def test_all_shipped_lessons_produce_context():
         ctx = llm.build_lesson_context(lesson)
         assert ctx.strip(), lesson.get("id")
         assert lesson["title"] in ctx
+
+
+# ------------------------------------------- large-file prompt construction
+def _arch_of(code):
+    from engine import analyze
+    return analyze(code)
+
+
+def test_prompt_discloses_truncation_and_still_maps_whole_file():
+    """A 1000-line file must never be silently half-sent to the model."""
+    body = "\n".join(
+        f"def fn{i}(a, b):\n    \"\"\"Doc {i}.\"\"\"\n    return a + b + {i}\n"
+        for i in range(400))
+    a = _arch_of(body)
+    prompt = llm.build_user_prompt(body, a["summary"], [], a["architecture"],
+                                   a["finding_groups"])
+    assert len(body) > llm.MAX_CODE_IN_PROMPT, "sample must be big enough to clip"
+    assert "NOTE: only lines" in prompt
+    # The structural map must still reach the last function in the file.
+    assert "fn399" in prompt
+
+
+def test_small_file_prompt_has_no_truncation_note():
+    code = "def add(a, b):\n    return a + b\n"
+    a = _arch_of(code)
+    prompt = llm.build_user_prompt(code, a["summary"], [], a["architecture"], [])
+    assert "NOTE: only lines" not in prompt
+    assert "add" in prompt
+
+
+def test_prompt_is_line_numbered_for_citation():
+    a = _arch_of("x = 1\ny = 2\n")
+    prompt = llm.build_user_prompt("x = 1\ny = 2\n", a["summary"], [], a["architecture"], [])
+    assert "   1 | x = 1" in prompt
+    assert "   2 | y = 2" in prompt
+
+
+def test_architecture_brief_is_empty_without_data():
+    assert llm.build_architecture_brief({}) == ""
+    assert llm.build_architecture_brief(None) == ""
+
+
+def test_deep_dive_system_prompt_asks_why_not_line_by_line():
+    assert "WHY" in llm.SYSTEM_PROMPT
+    assert "Purpose" in llm.SYSTEM_PROMPT
+    assert "trade-off" in llm.SYSTEM_PROMPT
+    # It must actively suppress the old restate-every-line behaviour.
+    assert "Do NOT restate the line-by-line walkthrough" in llm.SYSTEM_PROMPT
+
+
+def test_chat_system_prompt_includes_architecture(monkeypatch):
+    a = _arch_of(BIG_FOR_CHAT)
+    prompt = llm.build_chat_system_prompt(BIG_FOR_CHAT, a["summary"], [], a["architecture"])
+    assert "Structural map of the whole file" in prompt
+    assert "helper" in prompt
+
+
+BIG_FOR_CHAT = "def helper(x):\n    return x\n\ndef main():\n    return helper(1)\n"
+
+
+def test_server_built_prompt_is_not_clipped_to_the_chat_message_cap(monkeypatch):
+    """Regression: sanitize_messages' 8000-char guard silently truncated the
+    deep-dive prompt, so the model saw a third of a large file."""
+    seen = _capture(monkeypatch, OK)
+    prompt = "x" * (llm.MAX_MESSAGE_CHARS * 3)
+    llm.call_llm("openai", "key", "m", prompt, GEMINI_BASE)
+    sent = seen["payload"]["messages"][-1]["content"]
+    assert len(sent) == len(prompt), "server prompt must survive intact"
+
+
+def test_client_chat_messages_are_still_capped(monkeypatch):
+    """The larger budget must NOT loosen the guard on untrusted browser input."""
+    seen = _capture(monkeypatch, OK)
+    llm.call_chat("openai", "key", "m",
+                  [{"role": "user", "content": "y" * 50_000}], GEMINI_BASE)
+    sent = seen["payload"]["messages"][-1]["content"]
+    assert len(sent) == llm.MAX_MESSAGE_CHARS

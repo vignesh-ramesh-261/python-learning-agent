@@ -19,7 +19,8 @@ Drop any Python snippet — especially AI-generated code — and get:
 | Section | What you get |
 |---|---|
 | **What this code is** | A plain-English summary + stats (functions, classes, nesting…) |
-| **Step-by-step walkthrough** | Every statement described in one sentence, indented by block depth |
+| **How it fits together** | An architecture map of the file: every class/function with an inferred role, why it exists, what calls it, entry points, dependencies and never-called (dead) code |
+| **Step-by-step walkthrough** | Every statement described in one sentence, indented by block depth (collapsed on large files) |
 | **Syntax & concepts used** | Each detected construct with **what** it is, **why the syntax is written that way**, a minimal example, the **interview angle**, and a link to the matching lesson |
 | **Code review** | ~23 static checks: bugs, smells, performance, security — each with *what/why* and a **concrete fixed snippet** |
 | **Run** | Executes in an isolated subprocess (5s timeout, CPU/memory limits) with **friendly, teachable explanations** when it crashes |
@@ -126,7 +127,7 @@ python-learning-agent/
 ├── app.py                  # Flask server + JSON API
 ├── engine/                 # the offline brain (pure stdlib: ast + subprocess)
 │   ├── constructs.py       #   construct detector + knowledge base (what/why/example/interview)
-│   ├── explain.py          #   statement-by-statement walkthrough + summary/stats
+│   ├── explain.py          #   walkthrough, architecture map, finding grouping, summary/stats
 │   ├── review.py           #   23 static review checks with concrete fixes
 │   ├── errors.py           #   traceback → friendly explanation (cause + fixes)
 │   └── runner.py           #   isolated subprocess execution (timeout, rlimits, -I mode)
@@ -143,7 +144,7 @@ python-learning-agent/
 
 | Endpoint | Method | Purpose |
 |---|---|---|
-| `/api/explain` | POST `{code}` | full static analysis (constructs, walkthrough, findings, stats) |
+| `/api/explain` | POST `{code}` | full static analysis (architecture, constructs, walkthrough, grouped findings, stats) |
 | `/api/run` | POST `{code}` | sandboxed execution + friendly error explanation |
 | `/api/lessons` | GET | the lesson bank |
 | `/api/quiz` | GET | the question bank |

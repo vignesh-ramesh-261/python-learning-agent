@@ -20,6 +20,10 @@ TIMEOUT = 60
 # Guardrails on client-supplied chat history.
 MAX_HISTORY_TURNS = 20
 MAX_MESSAGE_CHARS = 8000
+# Prompts the SERVER builds (the deep-dive) embed line-numbered source plus a
+# whole-file structural map, so they legitimately exceed the per-message cap
+# that guards untrusted client input.
+MAX_SERVER_PROMPT_CHARS = 60_000
 
 DEFAULT_OPENAI_BASE = "https://api.openai.com/v1"
 DEFAULT_ANTHROPIC_BASE = "https://api.anthropic.com"
@@ -101,12 +105,26 @@ def _default_model_for(base_url: str | None, fallback: str) -> str:
 
 
 SYSTEM_PROMPT = (
-    "You are a patient senior Python tutor. The user is a developer who relies on AI to "
-    "write scripts and now wants to truly UNDERSTAND Python to review code and pass "
-    "interviews. Explain clearly and concretely. Structure the answer with these headings: "
-    "1) What this code does, 2) Why the syntax is written this way, 3) Line-by-line notes "
-    "(only non-obvious lines), 4) What could be improved (with a short improved snippet), "
-    "5) Interview concepts hidden in this code. Be concise; use short code blocks."
+    "You are a senior Python engineer walking a developer through a codebase. They can "
+    "already see WHAT each line does — a static analyser has produced a statement-by-statement "
+    "walkthrough for them. Your job is the part a walkthrough cannot give them: WHY the code "
+    "is shaped this way, WHY each piece needs to exist, and HOW the pieces fit together.\n\n"
+    "Use these headings:\n"
+    "1) Purpose — in 2-3 sentences, what problem does this code solve, and for whom? Infer it "
+    "from names, docstrings and dependencies. Say plainly if you are inferring.\n"
+    "2) How it fits together — trace the main flow from the entry point through the key "
+    "functions. Name them. Explain why the work is split this way rather than one big function.\n"
+    "3) Why these design choices — for the most significant decisions (a dataclass here, a "
+    "generator there, this data structure, this error handling), explain the trade-off being "
+    "made and what the alternative would have cost. This is the most valuable section.\n"
+    "4) What to check first in review — the riskiest parts and why they are risky. Prefer "
+    "issues of consequence over style nits.\n"
+    "5) Concepts worth understanding — the transferable Python ideas this code depends on, "
+    "and the interview questions they map to.\n\n"
+    "Rules: be concrete and reference real names and line numbers from the code. Short code "
+    "blocks only where they clarify. Do NOT restate the line-by-line walkthrough — the user "
+    "already has it. If you are given only part of a file, reason about what you can see and "
+    "say clearly what you could not."
 )
 
 
@@ -165,18 +183,23 @@ def _http_json(url: str, headers: dict, payload: dict) -> dict:
 
 def call_llm(provider: str, api_key: str, model: str | None, user_prompt: str,
              base_url: str | None = None, system: str | None = None) -> str:
-    """Single-turn convenience wrapper around call_chat()."""
+    """Single-turn convenience wrapper around call_chat().
+
+    Used for the deep-dive, whose prompt is built server-side and may legitimately
+    be much larger than a browser-supplied chat message.
+    """
     return call_chat(provider, api_key, model,
                      [{"role": "user", "content": user_prompt}],
-                     base_url, system)
+                     base_url, system, max_chars=MAX_SERVER_PROMPT_CHARS)
 
 
 def call_chat(provider: str, api_key: str, model: str | None,
               messages: list[dict], base_url: str | None = None,
-              system: str | None = None) -> str:
+              system: str | None = None,
+              max_chars: int = MAX_MESSAGE_CHARS) -> str:
     """Multi-turn chat. `messages` is a list of {role: user|assistant, content}."""
     provider = (provider or "").lower().strip()
-    messages = sanitize_messages(messages)
+    messages = sanitize_messages(messages, max_chars=max_chars)
     if not messages:
         raise AIError("No message to send.")
     system = (system or SYSTEM_PROMPT)
@@ -187,12 +210,16 @@ def call_chat(provider: str, api_key: str, model: str | None,
     raise AIError("Unknown provider — choose 'openai' or 'anthropic'.")
 
 
-def sanitize_messages(messages, max_turns: int = MAX_HISTORY_TURNS) -> list[dict]:
+def sanitize_messages(messages, max_turns: int = MAX_HISTORY_TURNS,
+                      max_chars: int = MAX_MESSAGE_CHARS) -> list[dict]:
     """Validate/normalise a client-supplied history.
 
     Drops anything malformed, forces roles to user/assistant, trims each
     message and keeps only the most recent `max_turns` so the context (and the
     bill) cannot grow without bound. The final message must be from the user.
+
+    `max_chars` guards untrusted browser input; server-built prompts pass a
+    larger budget because they embed the source plus a whole-file map.
     """
     if not isinstance(messages, list):
         return []
@@ -207,7 +234,7 @@ def sanitize_messages(messages, max_turns: int = MAX_HISTORY_TURNS) -> list[dict
         content = content.strip()
         if role not in ("user", "assistant") or not content:
             continue
-        clean.append({"role": role, "content": content[:MAX_MESSAGE_CHARS]})
+        clean.append({"role": role, "content": content[:max_chars]})
     if len(clean) > max_turns:
         clean = clean[-max_turns:]
     # Never open the history with an assistant turn (Anthropic rejects it).
@@ -323,11 +350,19 @@ CHAT_SYSTEM_PROMPT = (
 
 
 def build_chat_system_prompt(code: str, static_summary: str = "",
-                             constructs: list[str] | None = None) -> str:
+                             constructs: list[str] | None = None,
+                             architecture: dict | None = None) -> str:
     """System prompt for the Q&A chat: tutor persona + the user's code as context."""
     parts = [CHAT_SYSTEM_PROMPT]
     if code and code.strip():
-        parts += ["", "The user's current code:", "```python", code[:8000], "```"]
+        shown, shown_lines, total_lines = _numbered(code, MAX_CODE_IN_PROMPT)
+        parts += ["", "The user's current code:", "```python", shown, "```"]
+        if shown_lines < total_lines:
+            parts += [f"(Only lines 1-{shown_lines} of {total_lines} are shown; the structural "
+                      "map below covers the whole file. Say so if asked about the rest.)"]
+    brief = build_architecture_brief(architecture or {})
+    if brief:
+        parts += ["", "Structural map of the whole file:", brief]
     if static_summary:
         parts += ["", f"A static analyzer determined: {static_summary}"]
     if constructs:
@@ -411,18 +446,127 @@ def build_lesson_system_prompt(lesson: dict) -> str:
     return LESSON_SYSTEM_PROMPT + "\n\nThe lesson the user is reading:\n\n" + context
 
 
-def build_user_prompt(code: str, static_summary: str, constructs: list[str]) -> str:
+MAX_CODE_IN_PROMPT = 14_000
+
+
+def _numbered(code: str, limit: int) -> tuple[str, int, int]:
+    """Line-number the source so the model can cite locations, clipped to `limit`."""
+    lines = code.splitlines()
+    out, used = [], 0
+    for i, line in enumerate(lines, start=1):
+        entry = f"{i:4} | {line}"
+        if used + len(entry) > limit:
+            return "\n".join(out), i - 1, len(lines)
+        out.append(entry)
+        used += len(entry) + 1
+    return "\n".join(out), len(lines), len(lines)
+
+
+def build_architecture_brief(arch: dict, max_items: int = 120) -> str:
+    """Compact structural map: what exists, what calls what, why each part is there.
+
+    This is what lets the deep-dive reason about a 1000-line file even when the
+    raw source has to be clipped — the shape of the whole program still fits.
+    """
+    if not isinstance(arch, dict) or not arch:
+        return ""
+    out: list[str] = []
+    deps = arch.get("dependencies") or []
+    if deps:
+        out.append("External dependencies: " + ", ".join(deps))
+    entries = arch.get("entry_points") or []
+    if entries:
+        out.append("Entry points: " + ", ".join(entries))
+
+    components = arch.get("components") or []
+    if components:
+        out.append("\nClasses:")
+        for c in components[:max_items]:
+            bits = [f"  L{c['line']} {c['name']}"]
+            if c.get("bases"):
+                bits.append(f"({', '.join(c['bases'])})")
+            if c.get("decorators"):
+                bits.append("[@" + ", @".join(c["decorators"]) + "]")
+            out.append(" ".join(bits))
+            if c.get("doc"):
+                out.append(f"      doc: {c['doc']}")
+            if c.get("members"):
+                out.append(f"      methods: {', '.join(c['members'][:12])}")
+        if len(components) > max_items:
+            out.append(f"  … +{len(components) - max_items} more classes")
+
+    funcs = arch.get("functions") or []
+    if funcs:
+        out.append("\nFunctions (line, name, inferred role, what it calls):")
+        if len(funcs) <= max_items:
+            for f in funcs:
+                calls = ", ".join(f.get("calls", [])[:6]) or "—"
+                marker = " [ENTRY]" if f.get("entry") else ""
+                out.append(f"  L{f['line']} {f['name']}({f.get('args','')}) — {f.get('role','')}"
+                           f"{marker}; calls: {calls}")
+        else:
+            # Too many to describe individually: keep the interesting ones in full
+            # and compress the rest to one line each, so the map still spans the
+            # whole file instead of stopping partway through.
+            def interesting(f):
+                return bool(f.get("entry") or f.get("owner") is None and f.get("callers"))
+            detailed = [f for f in funcs if interesting(f)][:max_items]
+            detailed_names = {f["name"] for f in detailed}
+            for f in detailed:
+                calls = ", ".join(f.get("calls", [])[:6]) or "—"
+                marker = " [ENTRY]" if f.get("entry") else ""
+                out.append(f"  L{f['line']} {f['name']}({f.get('args','')}) — {f.get('role','')}"
+                           f"{marker}; calls: {calls}")
+            rest = [f for f in funcs if f["name"] not in detailed_names]
+            if rest:
+                out.append(f"  Remaining {len(rest)} functions (name@line):")
+                out.append("    " + ", ".join(f"{f['name']}@{f['line']}" for f in rest))
+
+    orphans = arch.get("orphans") or []
+    if orphans:
+        out.append("\nNever called anywhere in this file: " + ", ".join(orphans[:15]))
+    return "\n".join(out)
+
+
+def build_user_prompt(code: str, static_summary: str, constructs: list[str],
+                      architecture: dict | None = None,
+                      finding_groups: list[dict] | None = None) -> str:
+    """Assemble the deep-dive prompt.
+
+    Large files are clipped, but the architecture brief still describes the whole
+    program, and the clipping is stated explicitly so the model never silently
+    pretends to have read code it never saw.
+    """
+    shown, shown_lines, total_lines = _numbered(code, MAX_CODE_IN_PROMPT)
     parts = [
-        "Explain this Python code to a learner:",
+        "Explain the following Python code. Focus on WHY it is built this way, not a "
+        "restatement of each line.",
         "",
         "```python",
-        code[:8000],
+        shown,
         "```",
     ]
+    if shown_lines < total_lines:
+        parts += [
+            "",
+            f"NOTE: only lines 1-{shown_lines} of {total_lines} are shown above "
+            f"({total_lines - shown_lines} lines omitted for length). The structural map "
+            "below covers the ENTIRE file, including the omitted part. Base your answer on "
+            "both, and say explicitly which parts you could not read in full.",
+        ]
+
+    brief = build_architecture_brief(architecture or {})
+    if brief:
+        parts += ["", "Structural map of the whole file:", brief]
     if static_summary:
-        parts += ["", "A static analyzer already determined:", static_summary]
+        parts += ["", "Static analysis summary:", static_summary]
     if constructs:
-        parts += ["Constructs detected: " + ", ".join(constructs)]
+        parts += ["", "Constructs detected: " + ", ".join(constructs)]
+    if finding_groups:
+        parts += ["", "Automated review flagged (rule × occurrences):"]
+        parts += [f"  - {g['title']} ×{g['count']} (e.g. line {g['lines'][0]})"
+                  if g.get("lines") else f"  - {g['title']} ×{g['count']}"
+                  for g in finding_groups[:12]]
     return "\n".join(parts)
 
 

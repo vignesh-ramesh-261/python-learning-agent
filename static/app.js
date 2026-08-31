@@ -269,9 +269,10 @@ async function explain() {
     } else {
       resultsEl.classList.remove("hidden");
       renderSummary(analysis);
-      renderWalkthrough(analysis.walkthrough);
+      renderArchitecture(analysis.architecture, analysis.stats);
+      renderWalkthrough(analysis.walkthrough, analysis.large);
       renderConstructs(analysis.constructs);
-      renderFindings(analysis.findings);
+      renderFindings(analysis.finding_groups || analysis.findings);
     }
     resultsEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
   } catch (err) {
@@ -326,19 +327,126 @@ function renderSummary(analysis) {
   }
 }
 
-function renderWalkthrough(steps) {
+/* A flat 400-step list is unreadable. On large files show the first slice and
+   let the user opt in to the rest. */
+const WALKTHROUGH_PREVIEW = 40;
+
+function renderWalkthrough(steps, isLarge) {
   const list = $("#walkthrough");
-  list.replaceChildren(
-    ...steps.map((step) =>
-      el("li", { class: `indent-${Math.min(step.depth, 3)}` },
-        el("span", { class: "ln", text: `L${step.line}` }),
-        el("div", {},
-          el("span", { class: "code", text: step.code }),
-          el("span", { class: "desc", text: step.text }),
-        ),
+  const note = $("#walkthrough-note");
+  const toggle = $("#walkthrough-toggle");
+  let expanded = !isLarge;
+
+  const item = (step) =>
+    el("li", { class: `indent-${Math.min(step.depth, 3)}` },
+      el("span", { class: "ln", text: `L${step.line}` }),
+      el("div", {},
+        el("span", { class: "code", text: step.code }),
+        el("span", { class: "desc", text: step.text }),
       ),
-    ),
-  );
+    );
+
+  function paint() {
+    const shown = expanded ? steps : steps.slice(0, WALKTHROUGH_PREVIEW);
+    list.replaceChildren(...shown.map(item));
+    toggle.textContent = expanded
+      ? "Collapse walkthrough"
+      : `Show all ${steps.length} steps →`;
+  }
+
+  if (isLarge) {
+    note.textContent =
+      `This file produces ${steps.length} steps — too many to read end to end. ` +
+      "Start with “How it fits together” above; expand this only when you need a specific line.";
+    note.classList.remove("hidden");
+    toggle.classList.remove("hidden");
+    toggle.onclick = () => { expanded = !expanded; paint(); };
+  } else {
+    note.classList.add("hidden");
+    toggle.classList.add("hidden");
+  }
+  paint();
+}
+
+/* The architecture map: what exists, why it exists, and what calls what. */
+function renderArchitecture(arch, stats) {
+  const wrap = $("#architecture");
+  if (!arch || (!arch.components?.length && !arch.functions?.length)) {
+    wrap.replaceChildren(el("p", { class: "muted", text:
+      "Straight-line script — no functions or classes to map. Read the walkthrough below." }));
+    return;
+  }
+  const nodes = [];
+
+  const meta = [];
+  if (arch.dependencies?.length) {
+    meta.push(el("p", {}, el("span", { class: "label", text: "Depends on" }),
+      arch.dependencies.join(", ")));
+  }
+  if (arch.entry_points?.length) {
+    meta.push(el("p", {}, el("span", { class: "label", text: "Starts at" }),
+      arch.entry_points.map((e) => `${e}()`).join(", ")));
+  } else if (stats && (stats.functions || stats.classes)) {
+    meta.push(el("p", { class: "muted small" },
+      "No explicit entry point (no __main__ guard or top-level call) — this file looks like a library/module."));
+  }
+  if (meta.length) nodes.push(el("div", { class: "arch-meta" }, ...meta));
+
+  if (arch.components?.length) {
+    nodes.push(el("h3", { class: "arch-h", text: `Classes (${arch.components.length})` }));
+    nodes.push(el("div", { class: "arch-list" }, ...arch.components.map((c) =>
+      el("details", { class: "arch-item" },
+        el("summary", {},
+          el("span", { class: "arch-name", text: c.name }),
+          el("span", { class: "arch-line", text: `L${c.line}` }),
+        ),
+        el("div", { class: "arch-body" },
+          c.doc ? el("p", { class: "arch-doc", text: c.doc }) : null,
+          el("p", {}, el("span", { class: "label", text: "Why it exists" }), c.why),
+          c.members?.length
+            ? el("p", { class: "muted small", text: `Methods: ${c.members.join(", ")}` })
+            : null,
+        ),
+      ))));
+  }
+
+  if (arch.functions?.length) {
+    nodes.push(el("h3", { class: "arch-h", text: `Functions (${arch.functions.length})` }));
+    nodes.push(el("div", { class: "arch-list" }, ...arch.functions.map((f) =>
+      el("details", { class: "arch-item" },
+        el("summary", {},
+          el("span", { class: "arch-name", text: `${f.name}(${f.args || ""})` }),
+          f.entry ? el("span", { class: "arch-tag entry", text: "entry" }) : null,
+          el("span", { class: "arch-role", text: f.role }),
+          el("span", { class: "arch-line", text: `L${f.line}` }),
+        ),
+        el("div", { class: "arch-body" },
+          f.doc ? el("p", { class: "arch-doc", text: f.doc }) : null,
+          el("p", { class: "small" },
+            el("span", { class: "label", text: "Calls" }),
+            f.calls?.length ? f.calls.join(", ") : "nothing"),
+          el("p", { class: "small" },
+            el("span", { class: "label", text: "Called by" }),
+            f.callers?.length ? f.callers.join(", ")
+              : (f.entry ? "the entry point" : "— nothing in this file")),
+          el("div", { class: "lesson-try" },
+            el("button", {
+              class: "chip-btn", type: "button", text: "💬 Why does this exist?",
+              onclick: () => codeChat.ask(
+                `Looking at \`${f.name}\` (line ${f.line}) in my code: why does this function ` +
+                "exist as a separate unit, what would break if I inlined it, and is its " +
+                "current design the right call?"),
+            }),
+          ),
+        ),
+      ))));
+  }
+
+  if (arch.orphans?.length) {
+    nodes.push(el("p", { class: "arch-warn" },
+      `Never called in this file: ${arch.orphans.join(", ")} — dead code, or a public API used elsewhere?`));
+  }
+  wrap.replaceChildren(...nodes);
 }
 
 function renderConstructs(constructs) {
@@ -381,24 +489,41 @@ function renderFindings(findings) {
     wrap.replaceChildren(el("p", { class: "all-clear", text: "✓ No issues found by the automated review. Nice code!" }));
     return;
   }
+  // Findings arrive grouped by rule (with a count + line list); tolerate the
+  // ungrouped shape too so the renderer stays backward compatible.
   wrap.replaceChildren(
-    ...findings.map((f) =>
-      el("div", { class: "finding", "data-severity": f.severity },
+    ...findings.map((f) => {
+      const lines = f.lines || (f.line != null ? [f.line] : []);
+      const count = f.count || lines.length || 1;
+      const shown = lines.slice(0, 8);
+      const lineLabel = count === 1
+        ? `line ${lines[0]}`
+        : `${count}× — lines ${shown.join(", ")}${lines.length > shown.length ? "…" : ""}`;
+      return el("div", { class: "finding", "data-severity": f.severity },
         el("h3", {},
           el("span", { class: `badge ${f.severity}`, text: f.severity }),
           el("span", { text: f.title }),
-          el("span", { class: "ln", text: `line ${f.line}` }),
+          el("span", { class: "ln", text: lineLabel }),
         ),
         el("p", { text: f.what }),
         el("p", { class: "muted", text: f.why }),
         f.fix ? el("pre", { text: f.fix }) : null,
-        f.lesson ? el("button", {
-          class: "lesson-link",
-          text: `→ Review the lesson: ${LESSON_TITLES[f.lesson] || f.lesson}`,
-          onclick: () => openLesson(f.lesson),
-        }) : null,
-      ),
-    ),
+        el("div", { class: "lesson-try" },
+          f.lesson ? el("button", {
+            class: "lesson-link",
+            text: `→ Review the lesson: ${LESSON_TITLES[f.lesson] || f.lesson}`,
+            onclick: () => openLesson(f.lesson),
+          }) : null,
+          el("button", {
+            class: "chip-btn", type: "button", text: "💬 Why does this matter here?",
+            onclick: () => codeChat.ask(
+              `The review flagged "${f.title}"${count > 1 ? ` in ${count} places` : ""} ` +
+              `(e.g. line ${lines[0]}). Why does this matter in MY code specifically — ` +
+              "what could actually go wrong, and what is the cleanest fix here?"),
+          }),
+        ),
+      );
+    }),
   );
 }
 

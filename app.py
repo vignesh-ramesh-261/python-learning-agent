@@ -77,7 +77,9 @@ def api_ai_explain():
 
     analysis = analyze(code)
     constructs = [c["name"] for c in analysis.get("constructs", [])][:12]
-    prompt = llm.build_user_prompt(code, analysis.get("summary", ""), constructs)
+    prompt = llm.build_user_prompt(
+        code, analysis.get("summary", ""), constructs,
+        analysis.get("architecture"), analysis.get("finding_groups"))
     if not api_key:
         return _bad_request(
             "No API key provided. Paste your key in the AI deep-dive box, or set "
@@ -120,15 +122,16 @@ def api_ai_chat():
         )
 
     code = (data.get("code") or "").strip()
-    summary, constructs = "", []
+    summary, constructs, arch = "", [], None
     if code:
         try:
             analysis = analyze(code)
             summary = analysis.get("summary", "")
             constructs = [c["name"] for c in analysis.get("constructs", [])][:12]
+            arch = analysis.get("architecture")
         except Exception:  # noqa: BLE001 - unparseable code must not block the chat
             pass
-    system = llm.build_chat_system_prompt(code, summary, constructs)
+    system = llm.build_chat_system_prompt(code, summary, constructs, arch)
 
     return _chat_reply(provider, api_key, model, messages, base_url, system)
 

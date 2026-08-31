@@ -253,12 +253,242 @@ def summarize(analysis: dict) -> str:
     if highlight:
         parts.append("Notable techniques: " + ", ".join(highlight[:4]) + ".")
 
+    arch = analysis.get("architecture") or {}
+    deps = arch.get("dependencies") or []
+    if deps:
+        parts.append("It builds on " + ", ".join(deps[:5])
+                     + (f" (+{len(deps) - 5} more)" if len(deps) > 5 else "") + ".")
+    entries = arch.get("entry_points") or []
+    if entries:
+        parts.append("Execution starts at " + ", ".join(f"{e}()" for e in entries[:3]) + ".")
+
+    groups = analysis.get("finding_groups") or []
     findings = analysis.get("findings", [])
-    if findings:
-        top = ", ".join(f["title"] for f in findings[:3])
-        more = f" (+{len(findings) - 3} more)" if len(findings) > 3 else ""
-        parts.append(f"The review flagged {len(findings)} improvement(s): {top}{more}.")
+    if groups:
+        # Report distinct problems, not raw hit count — 151 hits of 8 rules is 8 problems.
+        top = ", ".join(
+            g["title"] + (" \u00d7{}".format(g["count"]) if g["count"] > 1 else "")
+            for g in groups[:3])
+        more = f" (+{len(groups) - 3} more)" if len(groups) > 3 else ""
+        parts.append(
+            f"The review flagged {len(groups)} distinct issue(s) across {len(findings)} "
+            f"location(s): {top}{more}.")
     else:
         parts.append("The automated review found no obvious issues.")
 
     return " ".join(parts)
+
+
+# ---------------------------------------------------------------- architecture
+# The step-by-step walkthrough answers "what happens next". On a 1000-line file
+# it produces hundreds of flat steps and answers nothing about *why* the code is
+# shaped the way it is. The helpers below build a structural map instead:
+# components, the call graph, entry points and external dependencies — the
+# evidence needed to explain why each part exists.
+
+_DUNDER_ENTRY = "__main__"
+
+
+def _qualname(stack: list[str], name: str) -> str:
+    return ".".join([*stack, name])
+
+
+def _calls_in(node: ast.AST) -> list[str]:
+    """Names of things called inside a node (shallow, best-effort)."""
+    out: list[str] = []
+    for sub in ast.walk(node):
+        if not isinstance(sub, ast.Call):
+            continue
+        f = sub.func
+        if isinstance(f, ast.Name):
+            out.append(f.id)
+        elif isinstance(f, ast.Attribute):
+            # self.foo() -> foo ; mod.foo() -> mod.foo
+            if isinstance(f.value, ast.Name):
+                out.append(f.attr if f.value.id == "self" else f"{f.value.id}.{f.attr}")
+            else:
+                out.append(f.attr)
+    return out
+
+
+def _imported_names(tree: ast.Module) -> dict[str, str]:
+    """Map bound name -> owning top-level module."""
+    bound: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                bound[(a.asname or a.name).split(".")[0]] = a.name.split(".")[0]
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            for a in node.names:
+                bound[a.asname or a.name] = node.module.split(".")[0]
+    return bound
+
+
+def _role_of(fn: ast.AST, calls: list[str], imports: dict[str, str]) -> str:
+    """Best-effort one-word role, so the reader knows why a function exists."""
+    name = getattr(fn, "name", "")
+    lowered = name.lower()
+    called_mods = {imports[c.split(".")[0]] for c in calls if c.split(".")[0] in imports}
+
+    if isinstance(fn, ast.AsyncFunctionDef):
+        prefix = "async "
+    else:
+        prefix = ""
+    if any(isinstance(n, ast.Yield) or isinstance(n, ast.YieldFrom) for n in ast.walk(fn)):
+        return prefix + "generator — produces values lazily"
+    if lowered.startswith(("test_", "check_", "verify_")):
+        return prefix + "test/validation"
+    if lowered.startswith(("main", "run", "cli", "handle", "process")):
+        return prefix + "orchestrator — coordinates other functions"
+    if called_mods & {"json", "csv", "pickle", "yaml"}:
+        return prefix + "serialisation"
+    if called_mods & {"open", "pathlib", "os", "shutil", "io"} or "open" in calls:
+        return prefix + "I/O — touches the filesystem"
+    if called_mods & {"requests", "urllib", "httpx", "socket"}:
+        return prefix + "network I/O"
+    if called_mods & {"logging"}:
+        return prefix + "logging/diagnostics"
+    if lowered.startswith(("get_", "fetch_", "load_", "read_")):
+        return prefix + "accessor — retrieves data"
+    if lowered.startswith(("set_", "save_", "write_", "store_", "update_")):
+        return prefix + "mutator — writes data"
+    if lowered.startswith(("to_", "from_", "parse_", "format_", "convert_", "build_", "make_")):
+        return prefix + "transformer — converts between shapes"
+    if not calls:
+        return prefix + "leaf helper — self-contained, calls nothing"
+    return prefix + "helper"
+
+
+def architecture(tree: ast.Module, source: str) -> dict:
+    """A structural map of the program: components, call graph, entry points."""
+    imports = _imported_names(tree)
+    components: list[dict] = []
+    functions: dict[str, dict] = {}
+
+    def visit(body: list[ast.stmt], stack: list[str], owner: str | None) -> None:
+        for node in body:
+            if isinstance(node, ast.ClassDef):
+                methods = [n for n in node.body
+                           if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+                bases = [ast.unparse(b) for b in node.bases]
+                decorators = [ast.unparse(d) for d in node.decorator_list]
+                components.append({
+                    "kind": "class",
+                    "name": _qualname(stack, node.name),
+                    "line": node.lineno,
+                    "doc": (ast.get_docstring(node) or "").split("\n")[0][:120],
+                    "bases": bases,
+                    "decorators": decorators,
+                    "members": [m.name for m in methods],
+                    "why": _class_why(node, bases, decorators, methods),
+                })
+                visit(node.body, [*stack, node.name], node.name)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                calls = _calls_in(node)
+                qn = _qualname(stack, node.name)
+                functions[qn] = {
+                    "kind": "method" if owner else "function",
+                    "name": qn,
+                    "short": node.name,
+                    "line": node.lineno,
+                    "owner": owner,
+                    "doc": (ast.get_docstring(node) or "").split("\n")[0][:120],
+                    "args": _fmt_args(node),
+                    "calls": sorted({c for c in calls}),
+                    "role": _role_of(node, calls, imports),
+                    "callers": [],
+                }
+                visit(node.body, [*stack, node.name], owner)
+
+    visit(tree.body, [], None)
+
+    # Resolve callers using short names (best-effort: Python is dynamic).
+    by_short: dict[str, list[str]] = {}
+    for qn, info in functions.items():
+        by_short.setdefault(info["short"], []).append(qn)
+    for qn, info in functions.items():
+        for callee in info["calls"]:
+            for target in by_short.get(callee.split(".")[-1], []):
+                if target != qn and qn not in functions[target]["callers"]:
+                    functions[target]["callers"].append(qn)
+
+    entry_points = _entry_points(tree, functions)
+    for qn, info in functions.items():
+        info["entry"] = qn in entry_points
+
+    return {
+        "components": components,
+        "functions": [functions[k] for k in sorted(functions, key=lambda k: functions[k]["line"])],
+        "entry_points": sorted(entry_points),
+        "dependencies": sorted(set(imports.values())),
+        "orphans": sorted(qn for qn, i in functions.items()
+                          if not i["callers"] and not i["entry"] and not i["owner"]
+                          and not i["short"].startswith("_")),
+    }
+
+
+def _class_why(node: ast.ClassDef, bases: list[str], decorators: list[str],
+               methods: list) -> str:
+    names = {m.name for m in methods}
+    if any("dataclass" in d for d in decorators):
+        return "A @dataclass — exists to carry structured data; the decorator generates __init__/__repr__/__eq__."
+    if any(b.endswith("Enum") for b in bases):
+        return "An Enum — a closed set of named constants, safer than bare strings."
+    if any(b in {"Exception", "BaseException"} or b.endswith("Error") for b in bases):
+        return "A custom exception — lets callers catch this specific failure instead of a broad except."
+    if {"__enter__", "__exit__"} <= names:
+        return "A context manager — guarantees setup/teardown even if the body raises."
+    if {"__iter__"} <= names or {"__next__"} <= names:
+        return "An iterator/iterable — lets the object be used directly in a for loop."
+    if bases:
+        return f"Extends {', '.join(bases)} — specialises existing behaviour rather than duplicating it."
+    if not names - {"__init__"}:
+        return "Mostly data with little behaviour — consider a @dataclass or NamedTuple."
+    return "Bundles related state and the operations that act on it."
+
+
+def _entry_points(tree: ast.Module, functions: dict) -> set[str]:
+    """Where execution actually begins."""
+    entries: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.If):
+            test = ast.unparse(node.test)
+            if "__name__" in test and _DUNDER_ENTRY in test:
+                for called in _calls_in(node):
+                    for qn, info in functions.items():
+                        if info["short"] == called.split(".")[-1]:
+                            entries.add(qn)
+        elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+            for called in _calls_in(node):
+                for qn, info in functions.items():
+                    if info["short"] == called.split(".")[-1]:
+                        entries.add(qn)
+    return entries
+
+
+def group_findings(findings: list[dict]) -> list[dict]:
+    """Collapse repeated review hits into one entry per rule.
+
+    On a large file the same rule can fire dozens of times; 151 findings is a
+    wall, 8 rules with counts is a to-do list.
+    """
+    grouped: dict[str, dict] = {}
+    for f in findings:
+        key = f.get("id") or f.get("title")
+        g = grouped.get(key)
+        if g is None:
+            grouped[key] = {
+                **{k: f[k] for k in ("id", "severity", "what", "why", "fix", "lesson") if k in f},
+                "title": f.get("title", ""),
+                "count": 1,
+                "lines": [f.get("line")],
+            }
+        else:
+            g["count"] += 1
+            g["lines"].append(f.get("line"))
+    order = {"bug": 0, "warning": 1, "style": 2, "info": 3}
+    out = sorted(grouped.values(),
+                 key=lambda g: (order.get(g.get("severity"), 9), -g["count"]))
+    for g in out:
+        g["lines"] = sorted(l for l in g["lines"] if l is not None)
+    return out

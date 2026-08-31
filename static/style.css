@@ -354,3 +354,31 @@ details.iq .a p { margin: 0 0 8px; }
 .about-wrap code { font-size: 12.5px; }
 .about-wrap ul { padding-left: 20px; }
 .about-wrap li { margin: 6px 0; }
+
+/* ---------- architecture map ---------- */
+.arch-meta { margin-bottom: 12px; }
+.arch-meta p { margin: 4px 0; font-size: 13.5px; }
+.arch-h { font-size: 13px; text-transform: uppercase; letter-spacing: 1px;
+  color: var(--muted); margin: 14px 0 6px; }
+.arch-list { display: flex; flex-direction: column; gap: 6px; }
+.arch-item { border: 1px solid var(--border); border-radius: 8px; background: #101827; }
+.arch-item summary {
+  cursor: pointer; padding: 8px 12px; font-size: 13px;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.arch-item[open] summary { border-bottom: 1px solid var(--border); }
+.arch-name { font-family: var(--mono); color: var(--accent); }
+.arch-role { color: var(--muted); font-size: 12px; }
+.arch-line { margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.arch-tag { font-size: 10.5px; text-transform: uppercase; letter-spacing: .5px;
+  padding: 1px 6px; border-radius: 999px; }
+.arch-tag.entry { background: #14301f; color: var(--accent-2); border: 1px solid #285c3d; }
+.arch-body { padding: 10px 12px; }
+.arch-body p { margin: 5px 0; font-size: 13px; }
+.arch-doc { color: var(--muted); font-style: italic; }
+.arch-warn {
+  margin-top: 12px; border-left: 3px solid var(--amber); background: #191d2b;
+  padding: 8px 12px; border-radius: 0 8px 8px 0; font-size: 13px;
+}
+#walkthrough-toggle { margin-top: 10px; }
+#walkthrough-note { margin-bottom: 10px; }

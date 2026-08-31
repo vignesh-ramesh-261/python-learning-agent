@@ -71,9 +71,16 @@ def process(items):
               <div id="stats-row" class="stats-row"></div>
             </div>
 
-            <div class="card">
+            <div class="card" id="architecture-card">
+              <h2>How it fits together <span class="muted">— structure &amp; why each part exists</span></h2>
+              <div id="architecture"></div>
+            </div>
+
+            <div class="card" id="walkthrough-card">
               <h2>Step-by-step walkthrough</h2>
+              <div id="walkthrough-note" class="muted small hidden"></div>
               <ol class="walkthrough" id="walkthrough"></ol>
+              <button id="walkthrough-toggle" class="btn ghost small-btn hidden"></button>
             </div>
 
             <div class="card">
