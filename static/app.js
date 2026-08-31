@@ -1213,7 +1213,12 @@ const viz = (() => {
       sourceEl.appendChild(row);
     });
     const active = sourceEl.querySelector(".viz-line.active");
-    if (active) active.scrollIntoView({ block: "nearest" });
+    if (active) {
+      /* Scroll the code pane itself, never the page: scrollIntoView here would
+         drag the whole window on every step. */
+      const top = active.offsetTop - sourceEl.clientHeight / 2 + active.offsetHeight / 2;
+      sourceEl.scrollTop = Math.max(0, top);
+    }
 
     /* event badge */
     let badge = "";
@@ -1313,7 +1318,8 @@ const viz = (() => {
 
   async function open(code) {
     card.classList.remove("hidden");
-    card.scrollIntoView({ behavior: "smooth", block: "start" });
+    /* Wait for layout after unhiding, or the scroll targets a zero-height box. */
+    requestAnimationFrame(() => card.scrollIntoView({ behavior: "smooth", block: "start" }));
     bodyEl.classList.add("hidden");
     noteEl.classList.add("hidden");
     statusEl.textContent = "Tracing…";

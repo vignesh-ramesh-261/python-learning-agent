@@ -385,8 +385,11 @@ details.iq .a p { margin: 0 0 8px; }
 
 /* ------------------------------------------------------------ visualizer */
 /* Full-bleed across both grid columns: the code+state split needs real width,
-   and inside .results-col each half was only ~320px. */
-.viz-card { grid-column: 1 / -1; margin-top: 0; }
+   and inside .results-col each half was only ~320px.
+   grid-row: 1 pins it to the top of the grid — as the last child it opened
+   below ~8 stacked analysis cards, i.e. thousands of pixels off screen.
+   It is display:none until opened, so it costs nothing when unused. */
+.viz-card { grid-column: 1 / -1; grid-row: 1; margin-top: 0; }
 .viz-note {
   margin: 8px 0; padding: 8px 10px; border-radius: 8px;
   background: rgba(224,175,104,.12); border: 1px solid rgba(224,175,104,.35);
