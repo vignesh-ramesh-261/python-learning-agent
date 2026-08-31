@@ -44,11 +44,23 @@ class _StepLimit(Exception):
     """
 
 
+# Types whose repr() is guaranteed side-effect free. Anything else may define a
+# custom __repr__ that prints, mutates state, or is simply slow — calling it
+# would make the visualizer change the program it is meant to observe.
+_SAFE_REPR = (int, float, bool, str, bytes, complex, type(None),
+              list, tuple, dict, set, frozenset)
+
+
 def _short(value: object, limit: int = 60) -> str:
-    try:
-        text = repr(value)
-    except Exception:                      # a broken __repr__ must not kill the trace
-        return f"<{type(value).__name__} (repr failed)>"
+    """Render a value WITHOUT invoking a user-defined __repr__."""
+    if isinstance(value, _SAFE_REPR) and type(value) in _SAFE_REPR:
+        try:
+            text = repr(value)
+        except Exception:                  # a broken container element
+            return f"<{type(value).__name__}>"
+    else:
+        # Subclass or custom class: describe it structurally instead.
+        return f"<{type(value).__name__} object>"
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
@@ -110,20 +122,51 @@ def encode(value: object, heap: dict, depth: int = 0) -> dict:
     return {"t": "ref", "id": oid}
 
 
+def _referenced_names(code, _depth: int = 0) -> set:
+    """Global names a code object reads, including nested comprehensions.
+
+    A comprehension compiles to its own code object, so `[v for v in xs if v < LIMIT]`
+    leaves LIMIT out of the enclosing function's co_names.
+    """
+    names = set(code.co_names)
+    if _depth < 3:
+        for const in code.co_consts:
+            if hasattr(const, "co_names"):
+                names |= _referenced_names(const, _depth + 1)
+    return names
+
+
 def _frames(frame, heap: dict) -> list:
-    """Walk the stack, innermost last, keeping only user frames."""
+    """Walk the stack, innermost last, keeping only user frames.
+
+    Functions also report the module-level names they reference, because a
+    frame showing "no variables" while the code clearly uses CONFIG is more
+    confusing than showing nothing at all.
+    """
     stack, current = [], frame
     while current is not None:
         if current.f_code.co_filename == FILENAME:
             names = {k: v for k, v in current.f_locals.items() if k not in HIDDEN}
-            stack.append({
+            entry = {
                 "func": current.f_code.co_name,
                 "locals": [[k, encode(v, heap)] for k, v in names.items()],
-            })
+            }
+            if current.f_code.co_name != "<module>":
+                referenced = _referenced_names(current.f_code)
+                globals_seen = []
+                for key in referenced:
+                    if key in names or key in HIDDEN:
+                        continue
+                    if key in current.f_globals:
+                        value = current.f_globals[key]
+                        if callable(value) or isinstance(value, type):
+                            continue          # functions/classes are noise here
+                        globals_seen.append([key, encode(value, heap)])
+                if globals_seen:
+                    entry["globals"] = globals_seen[:MAX_ITEMS]
+            stack.append(entry)
         current = current.f_back
     stack.reverse()
-    if stack:
-        stack[0]["func"] = "<module>" if stack[0]["func"] == "<module>" else stack[0]["func"]
     return stack
 
 

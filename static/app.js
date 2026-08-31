@@ -1231,16 +1231,25 @@ const viz = (() => {
       if (!frame.locals.length) {
         box.appendChild(el("div", { class: "viz-empty", text: "no variables yet" }));
       }
-      frame.locals.forEach(([name, value]) => {
-        const row = el("div", { class: "viz-var" },
+      const addRow = (name, value, extraClass) => {
+        const row = el("div", { class: "viz-var" + (extraClass ? " " + extraClass : "") },
           el("span", { class: "viz-varname", text: name }));
         row.appendChild(renderValue(value));
         if (value && value.t === "ref") {
           const entry = step.heap[value.id];
-          if (entry) row.appendChild(el("span", { class: "viz-hint", text: entry.t }));
+          row.appendChild(el("span", { class: "viz-hint", text: entry ? entry.t : "" }));
+        } else {
+          row.appendChild(el("span", { class: "viz-hint", text: "" }));
         }
         box.appendChild(row);
-      });
+      };
+      frame.locals.forEach(([name, value]) => addRow(name, value));
+      /* Module-level names the function reads — otherwise the panel looks empty
+         even though the code clearly uses them. */
+      if (frame.globals && frame.globals.length) {
+        box.appendChild(el("div", { class: "viz-scope-label", text: "from module scope" }));
+        frame.globals.forEach(([name, value]) => addRow(name, value, "is-global"));
+      }
       framesEl.appendChild(box);
     });
 

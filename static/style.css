@@ -384,7 +384,9 @@ details.iq .a p { margin: 0 0 8px; }
 #walkthrough-note { margin-bottom: 10px; }
 
 /* ------------------------------------------------------------ visualizer */
-.viz-card { margin-top: 16px; }
+/* Full-bleed across both grid columns: the code+state split needs real width,
+   and inside .results-col each half was only ~320px. */
+.viz-card { grid-column: 1 / -1; margin-top: 0; }
 .viz-note {
   margin: 8px 0; padding: 8px 10px; border-radius: 8px;
   background: rgba(224,175,104,.12); border: 1px solid rgba(224,175,104,.35);
@@ -392,17 +394,28 @@ details.iq .a p { margin: 0 0 8px; }
 }
 .viz-err { color: #f7768e !important; }
 
-.viz-controls { display: flex; align-items: center; gap: 6px; margin: 10px 0; flex-wrap: wrap; }
-.viz-controls input[type=range] { flex: 1; min-width: 140px; accent-color: #7aa2f7; }
-.viz-counter { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--muted); min-width: 96px; text-align: right; }
+.viz-controls {
+  display: flex; align-items: center; gap: 6px; margin: 10px 0 14px; flex-wrap: wrap;
+  padding: 8px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px;
+}
+.viz-controls .btn { flex: 0 0 auto; }
+.viz-controls input[type=range] { flex: 1 1 180px; min-width: 120px; accent-color: #7aa2f7; }
+.viz-counter {
+  font-variant-numeric: tabular-nums; font-size: 12px; color: var(--muted);
+  flex: 0 0 auto; min-width: 104px; text-align: right;
+}
+#viz-play { min-width: 86px; }
 
-.viz-grid { display: grid; grid-template-columns: 1.1fr 1fr; gap: 12px; align-items: start; }
-@media (max-width: 900px) { .viz-grid { grid-template-columns: 1fr; } }
+.viz-grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+@media (max-width: 980px) { .viz-grid { grid-template-columns: 1fr; } }
 .viz-grid h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 6px; }
-.viz-state h3 + div { margin-bottom: 12px; }
+.viz-state { display: grid; grid-template-columns: 1fr; gap: 4px; min-width: 0; }
+.viz-state h3 { margin-top: 4px; }
+.viz-state h3:first-child { margin-top: 0; }
+#viz-frames, #viz-heap { min-width: 0; }
 
 .viz-code pre {
-  margin: 0; max-height: 340px; overflow: auto; background: var(--panel-2);
+  margin: 0; max-height: 380px; overflow: auto; background: var(--panel-2);
   border: 1px solid var(--border); border-radius: 8px; padding: 8px 0; font-size: 13px;
 }
 .viz-line { display: flex; gap: 10px; padding: 1px 10px; white-space: pre; }
@@ -413,22 +426,35 @@ details.iq .a p { margin: 0 0 8px; }
 .viz-frame { border: 1px solid var(--border); border-radius: 8px; padding: 8px; margin-bottom: 8px; background: var(--panel-2); }
 .viz-frame.current { border-color: #7aa2f7; }
 .viz-frame-name { font-weight: 600; font-size: 13px; margin-bottom: 6px; color: #7aa2f7; }
-.viz-var { display: flex; align-items: center; gap: 8px; padding: 2px 0; font-size: 13px; }
-.viz-varname { min-width: 78px; color: var(--text); font-family: var(--mono); }
-.viz-hint { color: var(--muted); font-size: 11px; }
-.viz-prim { font-family: var(--mono); color: #9ece6a; }
+.viz-var {
+  display: grid; grid-template-columns: minmax(60px, max-content) auto 1fr;
+  align-items: center; gap: 8px; padding: 3px 0; font-size: 13px;
+}
+.viz-varname {
+  color: var(--text); font-family: var(--mono);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.viz-hint { color: var(--muted); font-size: 11px; justify-self: start; }
+.viz-var .viz-prim { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.viz-prim { font-family: var(--mono); color: #9ece6a; word-break: break-word; }
 .viz-ref {
   display: inline-flex; align-items: center; justify-content: center;
   width: 20px; height: 18px; border-radius: 4px; color: #11131a; font-weight: 700; font-size: 11px;
 }
 .viz-empty { color: var(--muted); font-size: 12px; font-style: italic; }
 
+#viz-frames, #viz-heap { max-height: 300px; overflow: auto; }
 .viz-obj { border: 1px solid var(--border); border-left-width: 4px; border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; background: var(--panel-2); }
 .viz-obj-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
 .viz-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
 .viz-obj-type { font-size: 11px; text-transform: lowercase; color: var(--muted); }
 .viz-obj-body { display: flex; flex-wrap: wrap; gap: 4px; }
-.viz-cell { display: flex; align-items: center; gap: 4px; border: 1px solid var(--border); border-radius: 6px; padding: 2px 6px; font-size: 12px; }
+.viz-cell {
+  display: flex; align-items: center; gap: 4px; border: 1px solid var(--border);
+  border-radius: 6px; padding: 2px 6px; font-size: 12px;
+  max-width: 100%; overflow: hidden;
+}
+.viz-cell .viz-prim { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
 .viz-idx { color: var(--muted); font-size: 11px; }
 .viz-more { color: var(--muted); font-size: 11px; align-self: center; }
 .viz-alias {
@@ -436,10 +462,17 @@ details.iq .a p { margin: 0 0 8px; }
   background: rgba(158,206,106,.12); border: 1px solid rgba(158,206,106,.35); color: #9ece6a;
 }
 
-.viz-foot { display: flex; gap: 12px; align-items: flex-end; margin-top: 12px; }
-.viz-out { flex: 1; }
+.viz-foot { display: flex; gap: 12px; align-items: flex-end; margin-top: 14px; flex-wrap: wrap; }
+.viz-out { flex: 1 1 320px; min-width: 0; }
+.viz-foot .btn { flex: 0 0 auto; }
+@media (max-width: 620px) { .viz-foot .btn { width: 100%; } }
 .viz-out h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 6px; }
 .viz-out pre {
   margin: 0; min-height: 34px; max-height: 110px; overflow: auto; font-size: 13px;
   background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; color: #9ece6a;
 }
+.viz-scope-label {
+  font-size: 10px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--muted); margin: 6px 0 2px; opacity: .8;
+}
+.viz-var.is-global .viz-varname { color: var(--muted); font-style: italic; }

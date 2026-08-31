@@ -234,3 +234,66 @@ class TestTraceEndpoint:
         resp = self.client.post("/api/trace", json={"code": "def f(:"})
         assert resp.status_code == 200
         assert "SyntaxError" in resp.get_json()["error"]
+
+
+def test_tracer_never_invokes_a_user_defined_repr():
+    """Regression: rendering values ran __repr__, so observing changed the program."""
+    code = ("class A:\n"
+            "    def __repr__(self):\n"
+            "        print('SIDE EFFECT')\n"
+            "        return 'A()'\n"
+            "a = A()\n"
+            "x = 1\n")
+    result = trace_code(code)
+    assert result["ok"] is True
+    assert "SIDE EFFECT" not in result["stdout"]
+
+
+def test_module_level_names_are_shown_inside_functions():
+    """Regression: a frame using CONFIG showed no variables at all."""
+    result = trace_code("CONFIG = {'k': 1}\ndef f():\n    return CONFIG['k']\nf()\n")
+    inner = [s for s in result["steps"] if s["stack"][-1]["func"] == "f"]
+    assert inner, "no frame for f()"
+    names = [n for n, _ in inner[0]["stack"][-1].get("globals", [])]
+    assert "CONFIG" in names
+
+
+def test_imported_functions_are_not_listed_as_globals():
+    """Helper functions would drown the panel; only data is useful."""
+    result = trace_code("def helper():\n    return 1\ndef f():\n    return helper()\nf()\n")
+    inner = [s for s in result["steps"] if s["stack"][-1]["func"] == "f"]
+    names = [n for n, _ in inner[0]["stack"][-1].get("globals", [])]
+    assert "helper" not in names
+
+
+def test_deep_recursion_is_capped_rather_than_exploding():
+    result = trace_code("def f(n):\n    return f(n + 1)\nf(0)\n")
+    assert result["ok"] is True
+    assert result["truncated"] is True
+    assert len(json.dumps(result)) < 1024 * 1024
+
+
+def test_blocking_input_does_not_hang_the_tracer():
+    """stdin is /dev/null, so input() must fail fast instead of waiting."""
+    result = trace_code("name = input('who? ')\n")
+    assert result["ok"] is True
+    assert result["timed_out"] is False
+    assert "EOFError" in (result["error"] or "")
+
+
+def test_sys_exit_is_reported_not_swallowed():
+    result = trace_code("import sys\nx = 1\nsys.exit(3)\n")
+    assert result["ok"] is True
+    assert "SystemExit" in (result["error"] or "")
+
+
+def test_globals_used_only_inside_a_comprehension_are_found():
+    """A comprehension is its own code object, so co_names alone misses LIMIT."""
+    code = ("LIMIT = 3\n"
+            "def check(vals):\n"
+            "    return [v for v in vals if v < LIMIT]\n"
+            "check([1, 5, 2])\n")
+    result = trace_code(code)
+    inner = [s for s in result["steps"] if s["stack"][-1]["func"] == "check"]
+    names = [n for n, _ in inner[0]["stack"][-1].get("globals", [])]
+    assert "LIMIT" in names

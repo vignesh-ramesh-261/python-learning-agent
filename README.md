@@ -148,6 +148,21 @@ python-learning-agent/
 |---|---|---|
 | `/api/explain` | POST `{code}` | full static analysis (architecture, constructs, walkthrough, grouped findings, stats) |
 | `/api/trace` | POST `{code}` | step-by-step execution recording for the visualizer |
+
+### Visualizer scope and limits
+
+Built for short snippets — the kind of 10–20 line puzzle where "why did `a` change?"
+is the whole question. Deliberate limits:
+
+* **150 steps / 600 KB** per recording (`PLA_TRACE_MAX_STEPS`, `PLA_TRACE_MAX_PAYLOAD`).
+  Hitting either stops the recording and says so rather than truncating silently.
+* **No `input()`** — stdin is `/dev/null`, so it raises `EOFError` immediately.
+* **Library internals are skipped.** Only lines from your file produce steps.
+* **Custom `__repr__` is never called**, so the visualizer cannot trigger side
+  effects in the program it is observing; such objects show as `<Name object>`.
+* **Output timing is approximate.** `stdout` is captured for the whole run and
+  revealed proportionally while stepping, so mid-run it may lead or lag by a line.
+* Deep recursion is capped by the payload budget (roughly 40+ frames).
 | `/api/run` | POST `{code}` | sandboxed execution + friendly error explanation |
 | `/api/lessons` | GET | the lesson bank |
 | `/api/quiz` | GET | the question bank |

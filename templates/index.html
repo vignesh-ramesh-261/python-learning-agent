@@ -100,48 +100,6 @@ def process(items):
             <div id="run-body"></div>
           </div>
 
-          <div class="card viz-card hidden" id="viz-card">
-            <div class="card-head">
-              <h2>Execution visualizer <span class="muted">— watch it run, step by step</span></h2>
-              <button class="btn ghost small-btn" id="viz-close" title="Hide the visualizer">Close</button>
-            </div>
-            <div id="viz-status" class="muted small"></div>
-            <div id="viz-note" class="viz-note hidden"></div>
-
-            <div id="viz-body" class="hidden">
-              <div class="viz-controls">
-                <button class="btn small-btn" id="viz-first" title="First step">⏮</button>
-                <button class="btn small-btn" id="viz-prev" title="Previous step">◀</button>
-                <button class="btn primary small-btn" id="viz-play" title="Play / pause">▶ Play</button>
-                <button class="btn small-btn" id="viz-next" title="Next step">▶</button>
-                <button class="btn small-btn" id="viz-last" title="Last step">⏭</button>
-                <input type="range" id="viz-slider" min="0" value="0" step="1" aria-label="Step" />
-                <span class="viz-counter" id="viz-counter"></span>
-              </div>
-
-              <div class="viz-grid">
-                <div class="viz-code">
-                  <h3>Code</h3>
-                  <pre id="viz-source" aria-live="off"></pre>
-                </div>
-                <div class="viz-state">
-                  <h3>Frames <span class="muted small">— who is running</span></h3>
-                  <div id="viz-frames"></div>
-                  <h3>Objects <span class="muted small">— what lives in memory</span></h3>
-                  <div id="viz-heap"></div>
-                </div>
-              </div>
-
-              <div class="viz-foot">
-                <div class="viz-out">
-                  <h3>Output so far</h3>
-                  <pre id="viz-stdout"></pre>
-                </div>
-                <button class="btn ghost small-btn" id="viz-ask">💬 Ask the tutor about this step</button>
-              </div>
-            </div>
-          </div>
-
           <div class="card ai-card">
             <h2>AI deep-dive <span class="muted">(optional — your own API key)</span></h2>
             <p class="muted">The static analysis above works fully offline. For an extra LLM-written narrative,
@@ -180,6 +138,47 @@ def process(items):
                 <button class="btn primary chat-send" type="submit">Send</button>
               </form>
               <div class="chat-status muted small"></div>
+            </div>
+          </div>
+        </div>
+        <div class="card viz-card hidden" id="viz-card">
+          <div class="card-head">
+            <h2>Execution visualizer <span class="muted">— watch it run, step by step</span></h2>
+            <button class="btn ghost small-btn" id="viz-close" title="Hide the visualizer">Close</button>
+          </div>
+          <div id="viz-status" class="muted small"></div>
+          <div id="viz-note" class="viz-note hidden"></div>
+
+          <div id="viz-body" class="hidden">
+            <div class="viz-controls">
+              <button class="btn small-btn" id="viz-first" title="First step">⏮</button>
+              <button class="btn small-btn" id="viz-prev" title="Previous step">◀</button>
+              <button class="btn primary small-btn" id="viz-play" title="Play / pause">▶ Play</button>
+              <button class="btn small-btn" id="viz-next" title="Next step">▶</button>
+              <button class="btn small-btn" id="viz-last" title="Last step">⏭</button>
+              <input type="range" id="viz-slider" min="0" value="0" step="1" aria-label="Step" />
+              <span class="viz-counter" id="viz-counter"></span>
+            </div>
+
+            <div class="viz-grid">
+              <div class="viz-code">
+                <h3>Code</h3>
+                <pre id="viz-source" aria-live="off"></pre>
+              </div>
+              <div class="viz-state">
+                <h3>Frames <span class="muted small">— who is running</span></h3>
+                <div id="viz-frames"></div>
+                <h3>Objects <span class="muted small">— what lives in memory</span></h3>
+                <div id="viz-heap"></div>
+              </div>
+            </div>
+
+            <div class="viz-foot">
+              <div class="viz-out">
+                <h3>Output so far</h3>
+                <pre id="viz-stdout"></pre>
+              </div>
+              <button class="btn ghost small-btn" id="viz-ask">💬 Ask the tutor about this step</button>
             </div>
           </div>
         </div>
